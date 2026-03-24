@@ -21,11 +21,24 @@
       justify-content: center;
     }
 
-    #cameraFx {
-      position: fixed;
+    .stage {
+      position: relative;
+      width: 720px;
+      height: 1280px;
+      background: #fff;
+      overflow: hidden;
+    }
+
+    #cameraFx,
+    #gl {
+      position: absolute;
       inset: 0;
       width: 100%;
       height: 100%;
+      display: block;
+    }
+
+    #cameraFx {
       z-index: 0;
       display: none;
       background: #fff;
@@ -35,10 +48,8 @@
       display: block;
     }
 
-    canvas {
-      display: block;
+    #gl {
       cursor: default;
-      position: relative;
       z-index: 3;
     }
 
@@ -54,7 +65,8 @@
     }
 
     .controls button,
-    .controls input {
+    .controls input,
+    .controls select {
       border: 1px solid #000;
       border-radius: 5px;
       background: #000;
@@ -69,6 +81,11 @@
 
     .controls input {
       width: 120px;
+      outline: none;
+    }
+
+    .controls select {
+      max-width: 220px;
       outline: none;
     }
 
@@ -116,10 +133,11 @@
 <body>
   <div class="controls">
     <button id="cameraBtn" type="button">Camera</button>
+    <select id="cameraSelect" aria-label="Selecionar camera">
+      <option value="">Camera padrao</option>
+    </select>
     <button id="scanBtn" type="button">Escanear</button>
     <button id="resetBtn" type="button">Resetar</button>
-    <input id="sizeInput" type="text" placeholder="1280x720" />
-    <button id="sizeBtn" type="button">Aplicar</button>
     <button id="saveBtn" type="button">Salvar JPG</button>
     <button id="recordBtn" type="button">Gravar Video</button>
   </div>
@@ -130,17 +148,18 @@
     <label>Velocidade <input id="speedSlider" type="range" min="0" max="100" value="32" /></label>
     <label>Contraste <input id="contrastSlider" type="range" min="50" max="220" value="125" /></label>
   </div>
-  <canvas id="cameraFx"></canvas>
-  <canvas id="gl"></canvas>
+  <div class="stage">
+    <canvas id="cameraFx"></canvas>
+    <canvas id="gl"></canvas>
+  </div>
   <script>
     const canvas = document.getElementById("gl");
     const cameraFx = document.getElementById("cameraFx");
     const cameraFxCtx = cameraFx.getContext("2d");
     const cameraBtn = document.getElementById("cameraBtn");
+    const cameraSelect = document.getElementById("cameraSelect");
     const scanBtn = document.getElementById("scanBtn");
     const resetBtn = document.getElementById("resetBtn");
-    const sizeInput = document.getElementById("sizeInput");
-    const sizeBtn = document.getElementById("sizeBtn");
     const saveBtn = document.getElementById("saveBtn");
     const recordBtn = document.getElementById("recordBtn");
     const densitySlider = document.getElementById("densitySlider");
@@ -220,8 +239,8 @@
     const GREEN = [0 / 255, 242 / 255, 103 / 255, 1];
 
     const state = {
-      lineCount: 20,
-      fineLineCount: 400,
+      lineCount: 15,
+      fineLineCount: 240,
       segments: 72,
       grabRadius: 30,
       hoverRadius: 40,
@@ -240,26 +259,32 @@
       pointerY: 0,
       pointerDown: false,
       cameraEnabled: false,
+      selectedVideoDeviceId: "",
+      availableVideoInputs: [],
       cameraVideo: null,
       cameraStream: null,
       cameraCanvas: null,
       cameraCtx: null,
-      cameraWidth: 96,
-      cameraHeight: 72,
+      cameraWidth: 120,
+      cameraHeight: 200,
       cameraLuma: null,
       cameraBgLuma: null,
       cameraPrevLuma: null,
       cameraMotion: null,
       cameraMask: null,
       cameraMaskSmooth: null,
+      cameraBodyX: 0.5,
+      cameraBodyY: 0.5,
+      cameraBodyMass: 0,
       cameraScanEnabled: false,
       cameraBgReady: false,
       recordStream: null,
+      recordCanvas: null,
+      recordCtx: null,
+      recordFrameHandle: 0,
       recorder: null,
       recordedChunks: [],
       isRecording: false,
-      customWidth: null,
-      customHeight: null,
       time: 0,
       symbolDensity: 16,
       symbolSize: 13,
@@ -304,69 +329,156 @@
       return Math.max(min, Math.min(max, value));
     }
 
+    function drawVideoCoverMirrored(ctx, video, destWidth, destHeight) {
+      const sourceWidth = video.videoWidth || destWidth;
+      const sourceHeight = video.videoHeight || destHeight;
+      const sourceAspect = sourceWidth / Math.max(1, sourceHeight);
+      const destAspect = destWidth / Math.max(1, destHeight);
+
+      let drawWidth = destWidth;
+      let drawHeight = destHeight;
+      let offsetX = 0;
+      let offsetY = 0;
+
+      if (sourceAspect > destAspect) {
+        drawHeight = destHeight;
+        drawWidth = drawHeight * sourceAspect;
+        offsetX = (destWidth - drawWidth) * 0.5;
+      } else {
+        drawWidth = destWidth;
+        drawHeight = drawWidth / sourceAspect;
+        offsetY = (destHeight - drawHeight) * 0.5;
+      }
+
+      ctx.save();
+      ctx.fillStyle = "#f5f1e9";
+      ctx.fillRect(0, 0, destWidth, destHeight);
+      ctx.translate(destWidth, 0);
+      ctx.scale(-1, 1);
+      ctx.drawImage(video, destWidth - offsetX - drawWidth, offsetY, drawWidth, drawHeight);
+      ctx.restore();
+    }
+
+    function clearCameraState() {
+      document.body.classList.remove("camera-on");
+      state.cameraEnabled = false;
+      state.cameraStream = null;
+      state.cameraVideo = null;
+      state.cameraCanvas = null;
+      state.cameraCtx = null;
+      state.cameraLuma = null;
+      state.cameraBgLuma = null;
+      state.cameraPrevLuma = null;
+      state.cameraMotion = null;
+      state.cameraMask = null;
+      state.cameraMaskSmooth = null;
+      state.cameraScanEnabled = false;
+      state.cameraBgReady = false;
+      cameraFxCtx.clearRect(0, 0, cameraFx.width, cameraFx.height);
+      cameraBtn.textContent = "Camera";
+      scanBtn.textContent = "Escanear";
+    }
+
+    function stopCameraStream() {
+      if (!state.cameraStream) return;
+      for (const track of state.cameraStream.getTracks()) {
+        track.stop();
+      }
+      state.cameraStream = null;
+    }
+
+    async function refreshVideoInputs() {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
+
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        state.availableVideoInputs = devices.filter((device) => device.kind === "videoinput");
+        const previousValue = state.selectedVideoDeviceId;
+
+        cameraSelect.innerHTML = "";
+
+        if (state.availableVideoInputs.length === 0) {
+          const option = document.createElement("option");
+          option.value = "";
+          option.textContent = "Sem camera";
+          cameraSelect.appendChild(option);
+          cameraSelect.value = "";
+          return;
+        }
+
+        const defaultOption = document.createElement("option");
+        defaultOption.value = "";
+        defaultOption.textContent = "Camera padrao";
+        cameraSelect.appendChild(defaultOption);
+
+        state.availableVideoInputs.forEach((device, index) => {
+          const option = document.createElement("option");
+          option.value = device.deviceId;
+          option.textContent = device.label || `Camera ${index + 1}`;
+          cameraSelect.appendChild(option);
+        });
+
+        const stillAvailable = state.availableVideoInputs.some((device) => device.deviceId === previousValue);
+        state.selectedVideoDeviceId = stillAvailable ? previousValue : "";
+        cameraSelect.value = state.selectedVideoDeviceId;
+      } catch (error) {
+        // Ignore device listing issues and keep the default selector option.
+      }
+    }
+
+    async function startCameraStream() {
+      const videoConstraints = state.selectedVideoDeviceId
+        ? { deviceId: { exact: state.selectedVideoDeviceId } }
+        : { facingMode: "user" };
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: videoConstraints,
+        audio: false
+      });
+
+      const video = document.createElement("video");
+      video.autoplay = true;
+      video.muted = true;
+      video.playsInline = true;
+      video.srcObject = stream;
+
+      const offscreen = document.createElement("canvas");
+      offscreen.width = state.cameraWidth;
+      offscreen.height = state.cameraHeight;
+      const ctx = offscreen.getContext("2d", { willReadFrequently: true });
+
+      state.cameraStream = stream;
+      state.cameraVideo = video;
+      state.cameraCanvas = offscreen;
+      state.cameraCtx = ctx;
+      state.cameraLuma = new Float32Array(state.cameraWidth * state.cameraHeight);
+      state.cameraBgLuma = new Float32Array(state.cameraWidth * state.cameraHeight);
+      state.cameraPrevLuma = new Float32Array(state.cameraWidth * state.cameraHeight);
+      state.cameraMotion = new Float32Array(state.cameraWidth * state.cameraHeight);
+      state.cameraMask = new Float32Array(state.cameraWidth * state.cameraHeight);
+      state.cameraMaskSmooth = new Float32Array(state.cameraWidth * state.cameraHeight);
+      state.cameraEnabled = true;
+      state.cameraBgReady = false;
+      state.cameraScanEnabled = false;
+      document.body.classList.add("camera-on");
+      cameraBtn.textContent = "Camera On";
+      scanBtn.textContent = "Escanear";
+
+      await video.play();
+      await refreshVideoInputs();
+    }
+
     async function toggleCamera() {
       if (state.cameraEnabled) {
-        if (state.cameraStream) {
-          for (const track of state.cameraStream.getTracks()) track.stop();
-        }
-        document.body.classList.remove("camera-on");
-        state.cameraEnabled = false;
-        state.cameraStream = null;
-        state.cameraVideo = null;
-        state.cameraCanvas = null;
-        state.cameraCtx = null;
-        state.cameraLuma = null;
-        state.cameraBgLuma = null;
-        state.cameraPrevLuma = null;
-        state.cameraMotion = null;
-        state.cameraMask = null;
-        state.cameraMaskSmooth = null;
-        state.cameraScanEnabled = false;
-        state.cameraBgReady = false;
-        cameraFxCtx.clearRect(0, 0, cameraFx.width, cameraFx.height);
-        cameraBtn.textContent = "Camera";
-        scanBtn.textContent = "Escanear";
+        stopCameraStream();
+        clearCameraState();
         return;
       }
 
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "user" },
-          audio: false
-        });
-
-        const video = document.createElement("video");
-        video.autoplay = true;
-        video.muted = true;
-        video.playsInline = true;
-        video.srcObject = stream;
-
-        const offscreen = document.createElement("canvas");
-        offscreen.width = state.cameraWidth;
-        offscreen.height = state.cameraHeight;
-        const ctx = offscreen.getContext("2d", { willReadFrequently: true });
-
-        state.cameraStream = stream;
-        state.cameraVideo = video;
-        state.cameraCanvas = offscreen;
-        state.cameraCtx = ctx;
-        state.cameraLuma = new Float32Array(state.cameraWidth * state.cameraHeight);
-        state.cameraBgLuma = new Float32Array(state.cameraWidth * state.cameraHeight);
-        state.cameraPrevLuma = new Float32Array(state.cameraWidth * state.cameraHeight);
-        state.cameraMotion = new Float32Array(state.cameraWidth * state.cameraHeight);
-        state.cameraMask = new Float32Array(state.cameraWidth * state.cameraHeight);
-        state.cameraMaskSmooth = new Float32Array(state.cameraWidth * state.cameraHeight);
-        state.cameraEnabled = true;
-        state.cameraBgReady = false;
-        state.cameraScanEnabled = false;
-        document.body.classList.add("camera-on");
-        cameraBtn.textContent = "Camera On";
-        scanBtn.textContent = "Escanear";
-
-        await video.play();
+        await startCameraStream();
       } catch (error) {
-        state.cameraEnabled = false;
-        cameraBtn.textContent = "Camera";
+        clearCameraState();
       }
     }
 
@@ -375,14 +487,14 @@
       if (state.cameraVideo.readyState < 2) return;
 
       const ctx = state.cameraCtx;
-      ctx.save();
-      ctx.scale(-1, 1);
-      ctx.drawImage(state.cameraVideo, -state.cameraWidth, 0, state.cameraWidth, state.cameraHeight);
-      ctx.restore();
+      drawVideoCoverMirrored(ctx, state.cameraVideo, state.cameraWidth, state.cameraHeight);
 
       const imageData = ctx.getImageData(0, 0, state.cameraWidth, state.cameraHeight);
       const data = imageData.data;
       const total = state.cameraWidth * state.cameraHeight;
+      let bodySum = 0;
+      let bodyX = 0;
+      let bodyY = 0;
 
       for (let i = 0; i < total; i++) {
         const idx = i * 4;
@@ -403,6 +515,13 @@
         const motionBoost = Math.min(0.22, state.cameraMotion[i] * 2.0);
         const mask = Math.max(0, Math.min(1, (diff - 0.05 + motionBoost) / 0.14));
         state.cameraMask[i] = mask;
+        if (mask > 0.08) {
+          const px = i % state.cameraWidth;
+          const py = Math.floor(i / state.cameraWidth);
+          bodySum += mask;
+          bodyX += px * mask;
+          bodyY += py * mask;
+        }
 
         const learnRate = mask > 0.12 ? 0.001 : 0.02;
         state.cameraBgLuma[i] = lerp(bg, luma, learnRate);
@@ -424,6 +543,14 @@
 
       if (!state.cameraBgReady) {
         state.cameraBgReady = true;
+      }
+
+      if (bodySum > 0.0001) {
+        state.cameraBodyX = bodyX / bodySum / Math.max(1, state.cameraWidth - 1);
+        state.cameraBodyY = bodyY / bodySum / Math.max(1, state.cameraHeight - 1);
+        state.cameraBodyMass = Math.min(1, bodySum / (state.cameraWidth * state.cameraHeight * 0.18));
+      } else {
+        state.cameraBodyMass *= 0.92;
       }
 
       renderCameraBackground();
@@ -523,10 +650,18 @@
       cameraFxCtx.lineCap = "round";
       cameraFxCtx.lineJoin = "round";
 
+      const scale = cameraFx.width / Math.max(1, state.width);
+      const renderX = state.boxX * scale;
+      const renderY = state.boxY * scale;
+      const renderWidth = state.boxWidth * scale;
+      const renderHeight = state.boxHeight * scale;
+      const pointerX = state.pointerX * scale;
+      const pointerY = state.pointerY * scale;
+
       const time = state.time * (0.004 + state.symbolSpeed * 0.02);
       const cols = Math.max(8, Math.round(state.symbolDensity * 5));
-      const cell = cameraFx.width / cols;
-      const rows = Math.ceil(cameraFx.height / cell);
+      const cell = renderWidth / cols;
+      const rows = Math.ceil(renderHeight / cell);
       const baseSize = cell * (0.32 + state.symbolSize / 28);
 
       for (let row = 0; row < rows; row++) {
@@ -534,11 +669,11 @@
           const gridNoise = hashNoise(col * 1.71, row * 2.13, 0);
           const jitterX = (gridNoise - 0.5) * cell * 0.16;
           const jitterY = (hashNoise(col * 2.91, row * 1.33, 0) - 0.5) * cell * 0.16;
-          const px = (col + 0.5) * cell + jitterX;
-          const py = (row + 0.5) * cell + jitterY;
+          const px = renderX + (col + 0.5) * cell + jitterX;
+          const py = renderY + (row + 0.5) * cell + jitterY;
 
-          const sx = (px / cameraFx.width) * state.cameraWidth;
-          const sy = (py / cameraFx.height) * state.cameraHeight;
+          const sx = ((px - renderX) / Math.max(1, renderWidth)) * state.cameraWidth;
+          const sy = ((py - renderY) / Math.max(1, renderHeight)) * state.cameraHeight;
           const luma = sampleLumaField(sx, sy);
           const motion = sampleField(state.cameraMotion, sx, sy);
           const grad = sampleGradientField(sx, sy);
@@ -558,12 +693,23 @@
           const darkness = 14 + (1 - contrastLuma) * 46;
           const alpha = 0.24 + (1 - contrastLuma) * 0.54 + gradMag * 3.0;
           const stroke = Math.max(1, localSize * (0.065 + gradMag * 0.7));
+          const hoverDist = Math.hypot(px - pointerX, py - pointerY);
+          const hoverRange = cell * 1.35;
+          const hoverMix = clamp(1 - hoverDist / hoverRange, 0, 1);
+          const baseColor = [darkness, darkness - 2, darkness - 5];
+          const hoverColor = [255, 105, 105];
+          const strokeColor = [
+            Math.round(lerp(baseColor[0], hoverColor[0], hoverMix)),
+            Math.round(lerp(baseColor[1], hoverColor[1], hoverMix)),
+            Math.round(lerp(baseColor[2], hoverColor[2], hoverMix))
+          ];
+          const strokeAlpha = clamp(alpha + hoverMix * 0.28, 0.18, 0.98);
 
           cameraFxCtx.save();
           cameraFxCtx.translate(px, py);
           cameraFxCtx.rotate(angle + Math.sin(time + col * 0.18 + row * 0.16) * 0.08 * state.symbolSpeed);
-          cameraFxCtx.strokeStyle = `rgba(${darkness}, ${darkness - 2}, ${darkness - 5}, ${clamp(alpha, 0.18, 0.95)})`;
-          cameraFxCtx.lineWidth = stroke;
+          cameraFxCtx.strokeStyle = `rgba(${strokeColor[0]}, ${strokeColor[1]}, ${strokeColor[2]}, ${strokeAlpha})`;
+          cameraFxCtx.lineWidth = stroke * (1 + hoverMix * 0.32);
           cameraFxCtx.beginPath();
           drawSymbol(cameraFxCtx, symbolIndex, localSize);
           cameraFxCtx.stroke();
@@ -577,8 +723,8 @@
         return { luma: 0.5, motion: 0, gx: 0, gy: 0, mask: 0, mx: 0, my: 0, depth: 0 };
       }
 
-      const u = Math.max(0, Math.min(1, x / Math.max(1, state.width)));
-      const v = Math.max(0, Math.min(1, y / Math.max(1, state.height)));
+      const u = Math.max(0, Math.min(1, (x - state.boxX) / Math.max(1, state.boxWidth)));
+      const v = Math.max(0, Math.min(1, (y - state.boxY) / Math.max(1, state.boxHeight)));
       const px = Math.max(1, Math.min(state.cameraWidth - 2, Math.round(u * (state.cameraWidth - 1))));
       const py = Math.max(1, Math.min(state.cameraHeight - 2, Math.round(v * (state.cameraHeight - 1))));
       const index = py * state.cameraWidth + px;
@@ -610,33 +756,10 @@
       scanBtn.textContent = "Escaneando";
     }
 
-    function applyCanvasSizeInput() {
-      const value = sizeInput.value.trim().toLowerCase();
-
-      if (value === "" || value === "auto") {
-        state.customWidth = null;
-        state.customHeight = null;
-        resize();
-        return true;
-      }
-
-      const match = value.match(/^(\d{2,5})\s*x\s*(\d{2,5})$/);
-      if (!match) return false;
-
-      const nextWidth = Number(match[1]);
-      const nextHeight = Number(match[2]);
-      if (nextWidth < 100 || nextHeight < 100) return false;
-
-      state.customWidth = nextWidth;
-      state.customHeight = nextHeight;
-      resize();
-      return true;
-    }
-
     function saveJpgFrame() {
       const exportCanvas = document.createElement("canvas");
-      exportCanvas.width = canvas.width;
-      exportCanvas.height = canvas.height;
+      exportCanvas.width = 720;
+      exportCanvas.height = 1280;
       const ctx = exportCanvas.getContext("2d");
       if (!ctx) return;
 
@@ -656,6 +779,33 @@
       link.click();
     }
 
+    function ensureRecordCanvas() {
+      if (!state.recordCanvas) {
+        state.recordCanvas = document.createElement("canvas");
+        state.recordCtx = state.recordCanvas.getContext("2d");
+      }
+      state.recordCanvas.width = 720;
+      state.recordCanvas.height = 1280;
+    }
+
+    function drawCompositeFrame(targetCtx, width, height) {
+      if (!targetCtx) return;
+      targetCtx.clearRect(0, 0, width, height);
+      if (state.cameraEnabled && cameraFx.width > 0 && cameraFx.height > 0) {
+        targetCtx.drawImage(cameraFx, 0, 0, width, height);
+      } else {
+        targetCtx.fillStyle = "#ffffff";
+        targetCtx.fillRect(0, 0, width, height);
+      }
+      targetCtx.drawImage(canvas, 0, 0, width, height);
+    }
+
+    function stepRecordCanvas() {
+      if (!state.isRecording || !state.recordCtx || !state.recordCanvas) return;
+      drawCompositeFrame(state.recordCtx, state.recordCanvas.width, state.recordCanvas.height);
+      state.recordFrameHandle = requestAnimationFrame(stepRecordCanvas);
+    }
+
     async function toggleRecording() {
       if (state.isRecording && state.recorder) {
         state.recorder.stop();
@@ -663,12 +813,9 @@
       }
 
       try {
-        const stream = await navigator.mediaDevices.getDisplayMedia({
-          video: {
-            frameRate: 30
-          },
-          audio: false
-        });
+        ensureRecordCanvas();
+        drawCompositeFrame(state.recordCtx, state.recordCanvas.width, state.recordCanvas.height);
+        const stream = state.recordCanvas.captureStream(30);
 
         let mimeType = "video/webm";
         if (MediaRecorder.isTypeSupported("video/webm;codecs=vp9")) {
@@ -682,6 +829,7 @@
         state.recorder = new MediaRecorder(stream, { mimeType });
         state.isRecording = true;
         recordBtn.textContent = "Parar Video";
+        state.recordFrameHandle = requestAnimationFrame(stepRecordCanvas);
 
         state.recorder.ondataavailable = (event) => {
           if (event.data && event.data.size > 0) {
@@ -699,6 +847,11 @@
           link.click();
           setTimeout(() => URL.revokeObjectURL(url), 1000);
 
+          if (state.recordFrameHandle) {
+            cancelAnimationFrame(state.recordFrameHandle);
+            state.recordFrameHandle = 0;
+          }
+
           if (state.recordStream) {
             for (const track of state.recordStream.getTracks()) track.stop();
           }
@@ -710,17 +863,12 @@
           recordBtn.textContent = "Gravar Video";
         };
 
-        const [videoTrack] = stream.getVideoTracks();
-        if (videoTrack) {
-          videoTrack.addEventListener("ended", () => {
-            if (state.recorder && state.recorder.state !== "inactive") {
-              state.recorder.stop();
-            }
-          });
-        }
-
         state.recorder.start(250);
       } catch (error) {
+        if (state.recordFrameHandle) {
+          cancelAnimationFrame(state.recordFrameHandle);
+          state.recordFrameHandle = 0;
+        }
         state.recordStream = null;
         state.recorder = null;
         state.recordedChunks = [];
@@ -737,7 +885,7 @@
       const vy = new Float32Array(state.segments);
       const restY = new Float32Array(state.segments);
       for (let i = 0; i < state.segments; i++) {
-        const py = (i / (state.segments - 1)) * state.height;
+        const py = state.boxY + (i / (state.segments - 1)) * state.boxHeight;
         x[i] = anchorX;
         restX[i] = anchorX;
         vx[i] = 0;
@@ -810,9 +958,9 @@
         : -1;
 
       state.boxX = 0;
-      state.boxY = 0;
+      state.boxY = 40;
       state.boxWidth = state.width;
-      state.boxHeight = state.height;
+      state.boxHeight = state.height - 80;
 
       state.leftMargin = state.width * 0.06;
       state.spacing = state.lineCount > 1 ? (state.width * 0.88) / (state.lineCount - 1) : 0;
@@ -849,8 +997,8 @@
 
     function resize() {
       state.dpr = Math.min(window.devicePixelRatio || 1, 2);
-      const cssWidth = state.customWidth || window.innerWidth;
-      const cssHeight = state.customHeight || window.innerHeight;
+      const cssWidth = 720;
+      const cssHeight = 1280;
       cameraFx.width = Math.floor(cssWidth * state.dpr);
       cameraFx.height = Math.floor(cssHeight * state.dpr);
       cameraFx.style.width = cssWidth + "px";
@@ -968,12 +1116,29 @@
           if (state.cameraScanEnabled) {
             const silhouetteForce = cameraField.mask;
             const fineBoost = line.isFine ? 1.75 : 1.0;
-            const depthPush = cameraField.depth * (line.isFine ? 34 : 20);
-            line.vx[i] += (cameraField.mx * 80 + cameraField.gx * 28 + (0.5 - cameraField.luma) * 10) * silhouetteForce * fineBoost;
-            line.vy[i] += (cameraField.my * 72 + cameraField.gy * 18) * silhouetteForce * fineBoost;
+            const bodyCenterX = state.boxX + state.cameraBodyX * state.boxWidth;
+            const bodyCenterY = state.boxY + state.cameraBodyY * state.boxHeight;
+            const dxBody = line.x[i] - bodyCenterX;
+            const dyBody = line.y[i] - bodyCenterY;
+            const bodyDistance = Math.hypot(dxBody, dyBody) || 1;
+            const bodyFalloff = Math.max(0, 1 - bodyDistance / (Math.min(state.boxWidth, state.boxHeight) * 0.42));
+            const edgeRepelX = -cameraField.mx * 180;
+            const edgeRepelY = -cameraField.my * 180;
+            const bodyRepel = silhouetteForce * (line.isFine ? 42 : 28) * (0.5 + state.cameraBodyMass * 0.9);
+            const interiorPushX = (dxBody / bodyDistance) * bodyRepel * bodyFalloff;
+            const interiorPushY = (dyBody / bodyDistance) * bodyRepel * bodyFalloff;
+            const depthPush = cameraField.depth * (line.isFine ? 38 : 24);
+            line.vx[i] += (edgeRepelX + cameraField.gx * 22 + (0.5 - cameraField.luma) * 10) * silhouetteForce * fineBoost;
+            line.vy[i] += (edgeRepelY + cameraField.gy * 16) * silhouetteForce * fineBoost;
+            line.vx[i] += interiorPushX;
+            line.vy[i] += interiorPushY;
             line.vx[i] += depthPush * ((i / (state.segments - 1)) - 0.5);
+            if (silhouetteForce > 0.24) {
+              line.x[i] += interiorPushX * 0.18;
+              line.y[i] += interiorPushY * 0.18;
+            }
             line.cameraDepth = Math.max(line.cameraDepth, cameraField.depth * fineBoost);
-            line.influence = Math.max(line.influence, Math.min(1, silhouetteForce * 1.1 + cameraField.motion * 1.8));
+            line.influence = Math.max(line.influence, Math.min(1, silhouetteForce * 1.35 + cameraField.motion * 1.8 + bodyFalloff * state.cameraBodyMass * 0.35));
           } else {
             const fineBoost = line.isFine ? 1.25 : 1.0;
             const motionForce = cameraField.motion * 42;
@@ -1061,7 +1226,7 @@
       }
       line.tension = Math.max(0, Math.min(1, maxStretch / (line.isFine ? 95 : 140)));
       const visualTension = Math.max(line.tension, line.influence);
-      line.thickness = line.isFine ? 1 : lerp(5, 22, visualTension);
+      line.thickness = line.isFine ? 1 : lerp(5, 80, visualTension);
     }
 
     function applyCurtainEffect() {
@@ -1209,7 +1374,7 @@
     }
 
     function pushSmoothLine(vertices, line, halfWidth, color, quality = 1) {
-      const subdivisions = Math.max(4, Math.ceil(Math.max(halfWidth * 1.4, 8) * quality));
+      const subdivisions = Math.max(6, Math.ceil(Math.max(halfWidth * 1.8, 10) * quality));
 
       for (let s = 0; s < state.segments - 1; s++) {
         const p = getCurvePoint(line, s);
@@ -1366,25 +1531,27 @@
       resetScene();
     });
 
-    sizeBtn.addEventListener("click", () => {
-      const ok = applyCanvasSizeInput();
-      sizeInput.style.outline = ok ? "" : "2px solid #c00";
-    });
-
-    sizeInput.addEventListener("keydown", (event) => {
-      if (event.key === "Enter") {
-        event.preventDefault();
-        const ok = applyCanvasSizeInput();
-        sizeInput.style.outline = ok ? "" : "2px solid #c00";
-      }
-    });
-
     saveBtn.addEventListener("click", () => {
       saveJpgFrame();
     });
 
     recordBtn.addEventListener("click", () => {
       toggleRecording();
+    });
+
+    cameraSelect.addEventListener("change", async () => {
+      state.selectedVideoDeviceId = cameraSelect.value;
+
+      if (!state.cameraEnabled) return;
+
+      stopCameraStream();
+      clearCameraState();
+
+      try {
+        await startCameraStream();
+      } catch (error) {
+        clearCameraState();
+      }
     });
 
     densitySlider.addEventListener("input", () => {
@@ -1407,6 +1574,7 @@
       state.symbolContrast = Number(contrastSlider.value) / 100;
     });
 
+    refreshVideoInputs();
     resize();
     frame();
   </script>
