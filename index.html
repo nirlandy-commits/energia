@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Linhas Elásticas WebGL</title>
+  <title>Energia, por Nirlandy Pinheiro</title>
   <style>
     :root {
       color-scheme: light;
@@ -89,6 +89,10 @@
       outline: none;
     }
 
+    #cameraSelect {
+      display: none;
+    }
+
     .controls input::placeholder {
       color: rgba(255, 255, 255, 0.7);
     }
@@ -128,6 +132,30 @@
       accent-color: #fff;
     }
 
+    .hud {
+      position: fixed;
+      bottom: 24px;
+      z-index: 12;
+      padding: 0;
+      background: transparent;
+      color: #6a6a6a;
+      font-size: 12px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      line-height: 1.5;
+      font-weight: 700;
+    }
+
+    .hud-left {
+      left: 24px;
+    }
+
+    .hud-right {
+      right: 24px;
+      text-align: right;
+      min-width: 150px;
+    }
+
   </style>
 </head>
 <body>
@@ -136,32 +164,33 @@
     <select id="cameraSelect" aria-label="Selecionar camera">
       <option value="">Camera padrao</option>
     </select>
-    <button id="scanBtn" type="button">Escanear</button>
     <button id="resetBtn" type="button">Resetar</button>
     <button id="saveBtn" type="button">Salvar JPG</button>
-    <button id="recordBtn" type="button">Gravar Video</button>
+    <button id="recordBtn" type="button">Gravar 4K HQ</button>
   </div>
   <div class="param-panel">
-    <label>Densidade <input id="densitySlider" type="range" min="8" max="28" value="16" /></label>
-    <label>Tamanho <input id="symbolSizeSlider" type="range" min="6" max="28" value="13" /></label>
-    <label>Mix <input id="symbolMixSlider" type="range" min="0" max="100" value="45" /></label>
-    <label>Velocidade <input id="speedSlider" type="range" min="0" max="100" value="32" /></label>
-    <label>Contraste <input id="contrastSlider" type="range" min="50" max="220" value="125" /></label>
+    <label>Densidade <input id="densitySlider" type="range" min="8" max="28" value="19" /></label>
+    <label>Tamanho <input id="symbolSizeSlider" type="range" min="6" max="28" value="26" /></label>
+    <label>Mix <input id="symbolMixSlider" type="range" min="0" max="100" value="0" /></label>
+    <label>Velocidade <input id="speedSlider" type="range" min="0" max="100" value="0" /></label>
+    <label>Contraste <input id="contrastSlider" type="range" min="50" max="220" value="195" /></label>
   </div>
   <div class="stage">
     <canvas id="cameraFx"></canvas>
     <canvas id="gl"></canvas>
   </div>
+  <div class="hud hud-left" id="legendHud">S salvar<br />SPACE gravar</div>
+  <div class="hud hud-right" id="recordHud">status: pronto<br />00:00</div>
   <script>
     const canvas = document.getElementById("gl");
     const cameraFx = document.getElementById("cameraFx");
     const cameraFxCtx = cameraFx.getContext("2d");
     const cameraBtn = document.getElementById("cameraBtn");
     const cameraSelect = document.getElementById("cameraSelect");
-    const scanBtn = document.getElementById("scanBtn");
     const resetBtn = document.getElementById("resetBtn");
     const saveBtn = document.getElementById("saveBtn");
     const recordBtn = document.getElementById("recordBtn");
+    const recordHud = document.getElementById("recordHud");
     const densitySlider = document.getElementById("densitySlider");
     const symbolSizeSlider = document.getElementById("symbolSizeSlider");
     const symbolMixSlider = document.getElementById("symbolMixSlider");
@@ -233,13 +262,13 @@
 
     const WHITE = [1, 1, 1, 1];
     const BLACK = [0, 0, 0, 1];
-    const WHITE_SOFT = [0, 0, 0, 0.16];
-    const WHITE_70 = [1, 1, 1, 0.7];
+    const WHITE_SOFT = [0, 0, 0, 0.28];
+    const DARK_FINE = [0.16, 0.16, 0.16, 0.82];
     const BLUE = [40 / 255, 120 / 255, 1, 1];
     const GREEN = [0 / 255, 242 / 255, 103 / 255, 1];
 
     const state = {
-      lineCount: 15,
+      lineCount: 10,
       fineLineCount: 240,
       segments: 72,
       grabRadius: 30,
@@ -276,21 +305,22 @@
       cameraBodyX: 0.5,
       cameraBodyY: 0.5,
       cameraBodyMass: 0,
-      cameraScanEnabled: false,
       cameraBgReady: false,
+      exportCanvas: null,
+      exportCtx: null,
       recordStream: null,
-      recordCanvas: null,
-      recordCtx: null,
-      recordFrameHandle: 0,
       recorder: null,
       recordedChunks: [],
-      isRecording: false,
+      recordingHighQuality: false,
+      recordingStartedAt: 0,
+      recordHotkeyDown: false,
+      rafId: 0,
       time: 0,
-      symbolDensity: 16,
-      symbolSize: 13,
-      symbolMix: 0.45,
-      symbolSpeed: 0.32,
-      symbolContrast: 1.25,
+      symbolDensity: 19,
+      symbolSize: 26,
+      symbolMix: 0,
+      symbolSpeed: 0,
+      symbolContrast: 1.95,
       dpr: 1,
       width: 1,
       height: 1
@@ -372,11 +402,9 @@
       state.cameraMotion = null;
       state.cameraMask = null;
       state.cameraMaskSmooth = null;
-      state.cameraScanEnabled = false;
       state.cameraBgReady = false;
       cameraFxCtx.clearRect(0, 0, cameraFx.width, cameraFx.height);
       cameraBtn.textContent = "Camera";
-      scanBtn.textContent = "Escanear";
     }
 
     function stopCameraStream() {
@@ -459,10 +487,8 @@
       state.cameraMaskSmooth = new Float32Array(state.cameraWidth * state.cameraHeight);
       state.cameraEnabled = true;
       state.cameraBgReady = false;
-      state.cameraScanEnabled = false;
       document.body.classList.add("camera-on");
       cameraBtn.textContent = "Camera On";
-      scanBtn.textContent = "Escanear";
 
       await video.play();
       await refreshVideoInputs();
@@ -642,38 +668,59 @@
       return 4;
     }
 
-    function renderCameraBackground() {
-      cameraFxCtx.setTransform(1, 0, 0, 1, 0, 0);
-      cameraFxCtx.clearRect(0, 0, cameraFx.width, cameraFx.height);
-      cameraFxCtx.fillStyle = "rgb(245, 241, 233)";
-      cameraFxCtx.fillRect(0, 0, cameraFx.width, cameraFx.height);
-      cameraFxCtx.lineCap = "round";
-      cameraFxCtx.lineJoin = "round";
+    function getRenderView(targetWidth, targetHeight) {
+      const scale = Math.min(
+        targetWidth / Math.max(1, state.width),
+        targetHeight / Math.max(1, state.height)
+      );
+      const offsetX = (targetWidth - state.width * scale) * 0.5;
+      const offsetY = (targetHeight - state.height * scale) * 0.5;
+      return {
+        scale,
+        offsetX,
+        offsetY,
+        renderX: offsetX + state.boxX * scale,
+        renderY: offsetY + state.boxY * scale,
+        renderWidth: state.boxWidth * scale,
+        renderHeight: state.boxHeight * scale,
+        pointerX: offsetX + state.pointerX * scale,
+        pointerY: offsetY + state.pointerY * scale
+      };
+    }
 
-      const scale = cameraFx.width / Math.max(1, state.width);
-      const renderX = state.boxX * scale;
-      const renderY = state.boxY * scale;
-      const renderWidth = state.boxWidth * scale;
-      const renderHeight = state.boxHeight * scale;
-      const pointerX = state.pointerX * scale;
-      const pointerY = state.pointerY * scale;
+    function colorToCss(color) {
+      const r = Math.round(clamp(color[0], 0, 1) * 255);
+      const g = Math.round(clamp(color[1], 0, 1) * 255);
+      const b = Math.round(clamp(color[2], 0, 1) * 255);
+      const a = color[3] === undefined ? 1 : clamp(color[3], 0, 1);
+      return `rgba(${r}, ${g}, ${b}, ${a})`;
+    }
 
-      const time = state.time * (0.004 + state.symbolSpeed * 0.02);
-      const cols = Math.max(8, Math.round(state.symbolDensity * 5));
-      const cell = renderWidth / cols;
-      const rows = Math.ceil(renderHeight / cell);
-      const baseSize = cell * (0.32 + state.symbolSize / 28);
+    function renderCameraBackgroundTo(ctx, targetWidth, targetHeight) {
+      const view = getRenderView(targetWidth, targetHeight);
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, targetWidth, targetHeight);
+      ctx.fillStyle = "rgb(245, 241, 233)";
+      ctx.fillRect(0, 0, targetWidth, targetHeight);
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+
+      const time = state.time * (0.002 + state.symbolSpeed * 0.04);
+      const cols = Math.max(6, Math.round(state.symbolDensity * 7));
+      const cell = view.renderWidth / cols;
+      const rows = Math.ceil(view.renderHeight / cell);
+      const baseSize = cell * (0.24 + state.symbolSize / 10);
 
       for (let row = 0; row < rows; row++) {
         for (let col = 0; col < cols; col++) {
           const gridNoise = hashNoise(col * 1.71, row * 2.13, 0);
           const jitterX = (gridNoise - 0.5) * cell * 0.16;
           const jitterY = (hashNoise(col * 2.91, row * 1.33, 0) - 0.5) * cell * 0.16;
-          const px = renderX + (col + 0.5) * cell + jitterX;
-          const py = renderY + (row + 0.5) * cell + jitterY;
+          const px = view.renderX + (col + 0.5) * cell + jitterX;
+          const py = view.renderY + (row + 0.5) * cell + jitterY;
 
-          const sx = ((px - renderX) / Math.max(1, renderWidth)) * state.cameraWidth;
-          const sy = ((py - renderY) / Math.max(1, renderHeight)) * state.cameraHeight;
+          const sx = ((px - view.renderX) / Math.max(1, view.renderWidth)) * state.cameraWidth;
+          const sy = ((py - view.renderY) / Math.max(1, view.renderHeight)) * state.cameraHeight;
           const luma = sampleLumaField(sx, sy);
           const motion = sampleField(state.cameraMotion, sx, sy);
           const grad = sampleGradientField(sx, sy);
@@ -685,15 +732,15 @@
           if (!keep) continue;
 
           const angleBase = Math.atan2(grad.gy, grad.gx);
-          const angle = angleBase + (hashNoise(col * 1.4, row * 1.6, 2.0) - 0.5) * 0.35;
-          const pulse = 0.9 + Math.sin(time * 3.2 + col * 0.31 + row * 0.27) * (0.06 + motion * 0.4);
-          const localSize = baseSize * pulse * (0.76 + (1 - contrastLuma) * 0.52);
+          const angle = angleBase + (hashNoise(col * 1.4, row * 1.6, 2.0) - 0.5) * 0.18;
+          const pulse = 0.96 + Math.sin(time * 1.4 + col * 0.23 + row * 0.19) * (0.02 + state.symbolSpeed * 0.07 + motion * 0.05);
+          const localSize = baseSize * pulse * (0.88 + (1 - contrastLuma) * 0.34);
           const mixNoise = hashNoise(col * 0.71, row * 0.93, time * 0.7);
           const symbolIndex = chooseSymbolIndex(contrastLuma, mixNoise);
           const darkness = 14 + (1 - contrastLuma) * 46;
           const alpha = 0.24 + (1 - contrastLuma) * 0.54 + gradMag * 3.0;
           const stroke = Math.max(1, localSize * (0.065 + gradMag * 0.7));
-          const hoverDist = Math.hypot(px - pointerX, py - pointerY);
+          const hoverDist = Math.hypot(px - view.pointerX, py - view.pointerY);
           const hoverRange = cell * 1.35;
           const hoverMix = clamp(1 - hoverDist / hoverRange, 0, 1);
           const baseColor = [darkness, darkness - 2, darkness - 5];
@@ -705,17 +752,21 @@
           ];
           const strokeAlpha = clamp(alpha + hoverMix * 0.28, 0.18, 0.98);
 
-          cameraFxCtx.save();
-          cameraFxCtx.translate(px, py);
-          cameraFxCtx.rotate(angle + Math.sin(time + col * 0.18 + row * 0.16) * 0.08 * state.symbolSpeed);
-          cameraFxCtx.strokeStyle = `rgba(${strokeColor[0]}, ${strokeColor[1]}, ${strokeColor[2]}, ${strokeAlpha})`;
-          cameraFxCtx.lineWidth = stroke * (1 + hoverMix * 0.32);
-          cameraFxCtx.beginPath();
-          drawSymbol(cameraFxCtx, symbolIndex, localSize);
-          cameraFxCtx.stroke();
-          cameraFxCtx.restore();
+          ctx.save();
+          ctx.translate(px, py);
+          ctx.rotate(angle + Math.sin(time * 0.9 + col * 0.18 + row * 0.16) * (0.008 + state.symbolSpeed * 0.05));
+          ctx.strokeStyle = `rgba(${strokeColor[0]}, ${strokeColor[1]}, ${strokeColor[2]}, ${strokeAlpha})`;
+          ctx.lineWidth = stroke * (1 + hoverMix * 0.32);
+          ctx.beginPath();
+          drawSymbol(ctx, symbolIndex, localSize);
+          ctx.stroke();
+          ctx.restore();
         }
       }
+    }
+
+    function renderCameraBackground() {
+      renderCameraBackgroundTo(cameraFxCtx, cameraFx.width, cameraFx.height);
     }
 
     function sampleCameraField(x, y) {
@@ -746,90 +797,101 @@
       return { luma, motion, gx, gy, mask, mx, my, depth };
     }
 
-    function scanPersonSilhouette() {
-      if (!state.cameraEnabled || !state.cameraLuma || !state.cameraBgLuma) return;
-      state.cameraBgLuma.set(state.cameraLuma);
-      if (state.cameraMask) state.cameraMask.fill(0);
-      if (state.cameraMaskSmooth) state.cameraMaskSmooth.fill(0);
-      state.cameraBgReady = true;
-      state.cameraScanEnabled = true;
-      scanBtn.textContent = "Escaneando";
-    }
-
     function saveJpgFrame() {
-      const exportCanvas = document.createElement("canvas");
-      exportCanvas.width = 720;
-      exportCanvas.height = 1280;
-      const ctx = exportCanvas.getContext("2d");
-      if (!ctx) return;
-
-      if (state.cameraEnabled && cameraFx.width > 0 && cameraFx.height > 0) {
-        ctx.drawImage(cameraFx, 0, 0, exportCanvas.width, exportCanvas.height);
-      } else {
-        ctx.fillStyle = "#ffffff";
-        ctx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
-      }
-
-      ctx.drawImage(canvas, 0, 0, exportCanvas.width, exportCanvas.height);
+      ensureExportCanvas(3840, 2160);
+      drawCompositeFrame(state.exportCtx, state.exportCanvas.width, state.exportCanvas.height);
 
       const link = document.createElement("a");
       const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-      link.href = exportCanvas.toDataURL("image/jpeg", 0.92);
-      link.download = `camera-lines-${stamp}.jpg`;
+      link.href = state.exportCanvas.toDataURL("image/jpeg", 0.96);
+      link.download = `energia-4k-${stamp}.jpg`;
       link.click();
     }
 
-    function ensureRecordCanvas() {
-      if (!state.recordCanvas) {
-        state.recordCanvas = document.createElement("canvas");
-        state.recordCtx = state.recordCanvas.getContext("2d");
+    function formatRecordingTime(ms) {
+      const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+      const minutes = String(Math.floor(totalSeconds / 60)).padStart(2, "0");
+      const seconds = String(totalSeconds % 60).padStart(2, "0");
+      return `${minutes}:${seconds}`;
+    }
+
+    function updateRecordingHud() {
+      if (state.recordingHighQuality) {
+        const elapsed = performance.now() - state.recordingStartedAt;
+        recordHud.innerHTML = `status: gravando<br />${formatRecordingTime(elapsed)}`;
+      } else {
+        recordHud.innerHTML = "status: pronto<br />00:00";
       }
-      state.recordCanvas.width = 720;
-      state.recordCanvas.height = 1280;
     }
 
     function drawCompositeFrame(targetCtx, width, height) {
       if (!targetCtx) return;
       targetCtx.clearRect(0, 0, width, height);
-      if (state.cameraEnabled && cameraFx.width > 0 && cameraFx.height > 0) {
+      if (state.cameraEnabled && width !== cameraFx.width) {
+        renderCameraBackgroundTo(targetCtx, width, height);
+      } else if (state.cameraEnabled && cameraFx.width > 0 && cameraFx.height > 0) {
         targetCtx.drawImage(cameraFx, 0, 0, width, height);
       } else {
         targetCtx.fillStyle = "#ffffff";
         targetCtx.fillRect(0, 0, width, height);
       }
-      targetCtx.drawImage(canvas, 0, 0, width, height);
+      if (width !== canvas.width) {
+        renderLinesToCanvas2D(targetCtx, width, height);
+      } else {
+        targetCtx.drawImage(canvas, 0, 0, width, height);
+      }
     }
 
-    function stepRecordCanvas() {
-      if (!state.isRecording || !state.recordCtx || !state.recordCanvas) return;
-      drawCompositeFrame(state.recordCtx, state.recordCanvas.width, state.recordCanvas.height);
-      state.recordFrameHandle = requestAnimationFrame(stepRecordCanvas);
+    function ensureExportCanvas(width = 3840, height = 2160) {
+      if (!state.exportCanvas) {
+        state.exportCanvas = document.createElement("canvas");
+        state.exportCtx = state.exportCanvas.getContext("2d", { alpha: false });
+      }
+      state.exportCanvas.width = width;
+      state.exportCanvas.height = height;
     }
 
-    async function toggleRecording() {
-      if (state.isRecording && state.recorder) {
+    function renderExportFrame() {
+      if (!state.exportCtx || !state.exportCanvas) return;
+      drawCompositeFrame(state.exportCtx, state.exportCanvas.width, state.exportCanvas.height);
+    }
+
+    async function toggleRecordingHighQuality() {
+      if (state.recordingHighQuality && state.recorder) {
         state.recorder.stop();
         return;
       }
 
       try {
-        ensureRecordCanvas();
-        drawCompositeFrame(state.recordCtx, state.recordCanvas.width, state.recordCanvas.height);
-        const stream = state.recordCanvas.captureStream(30);
+        ensureExportCanvas(3840, 2160);
+        renderExportFrame();
 
-        let mimeType = "video/webm";
+        const stream = state.exportCanvas.captureStream(30);
+        let mimeType = "";
         if (MediaRecorder.isTypeSupported("video/webm;codecs=vp9")) {
           mimeType = "video/webm;codecs=vp9";
         } else if (MediaRecorder.isTypeSupported("video/webm;codecs=vp8")) {
           mimeType = "video/webm;codecs=vp8";
+        } else if (MediaRecorder.isTypeSupported("video/webm")) {
+          mimeType = "video/webm";
         }
+
+        const recorderOptions = mimeType
+          ? {
+              mimeType,
+              videoBitsPerSecond: 80000000
+            }
+          : {
+              videoBitsPerSecond: 80000000
+            };
 
         state.recordedChunks = [];
         state.recordStream = stream;
-        state.recorder = new MediaRecorder(stream, { mimeType });
-        state.isRecording = true;
-        recordBtn.textContent = "Parar Video";
-        state.recordFrameHandle = requestAnimationFrame(stepRecordCanvas);
+        state.recorder = new MediaRecorder(stream, recorderOptions);
+        state.recordingHighQuality = true;
+        state.recordingStartedAt = performance.now();
+        recordBtn.textContent = "Parar 4K HQ";
+        updateRecordingHud();
 
         state.recorder.ondataavailable = (event) => {
           if (event.data && event.data.size > 0) {
@@ -838,42 +900,45 @@
         };
 
         state.recorder.onstop = () => {
-          const blob = new Blob(state.recordedChunks, { type: mimeType });
+          const finalMimeType = mimeType || "video/webm";
+          const blob = new Blob(state.recordedChunks, { type: finalMimeType });
           const url = URL.createObjectURL(blob);
           const link = document.createElement("a");
           const stamp = new Date().toISOString().replace(/[:.]/g, "-");
           link.href = url;
-          link.download = `camera-lines-${stamp}.webm`;
+          link.download = `energia-4k-hq-${stamp}.webm`;
           link.click();
           setTimeout(() => URL.revokeObjectURL(url), 1000);
 
-          if (state.recordFrameHandle) {
-            cancelAnimationFrame(state.recordFrameHandle);
-            state.recordFrameHandle = 0;
-          }
-
           if (state.recordStream) {
-            for (const track of state.recordStream.getTracks()) track.stop();
+            for (const track of state.recordStream.getTracks()) {
+              track.stop();
+            }
           }
 
           state.recordStream = null;
           state.recorder = null;
           state.recordedChunks = [];
-          state.isRecording = false;
-          recordBtn.textContent = "Gravar Video";
+          state.recordingHighQuality = false;
+          state.recordingStartedAt = 0;
+          recordBtn.textContent = "Gravar 4K HQ";
+          updateRecordingHud();
         };
 
         state.recorder.start(250);
       } catch (error) {
-        if (state.recordFrameHandle) {
-          cancelAnimationFrame(state.recordFrameHandle);
-          state.recordFrameHandle = 0;
+        if (state.recordStream) {
+          for (const track of state.recordStream.getTracks()) {
+            track.stop();
+          }
         }
         state.recordStream = null;
         state.recorder = null;
         state.recordedChunks = [];
-        state.isRecording = false;
-        recordBtn.textContent = "Gravar Video";
+        state.recordingHighQuality = false;
+        state.recordingStartedAt = 0;
+        recordBtn.textContent = "Gravar 4K HQ";
+        updateRecordingHud();
       }
     }
 
@@ -958,9 +1023,9 @@
         : -1;
 
       state.boxX = 0;
-      state.boxY = 40;
+      state.boxY = 0;
       state.boxWidth = state.width;
-      state.boxHeight = state.height - 80;
+      state.boxHeight = state.height;
 
       state.leftMargin = state.width * 0.06;
       state.spacing = state.lineCount > 1 ? (state.width * 0.88) / (state.lineCount - 1) : 0;
@@ -1039,6 +1104,15 @@
       return Math.max(1, Math.min(state.segments - 2, raw));
     }
 
+    function hoverAmountForLine(line) {
+      const seg = segmentIndexFromY(state.pointerY);
+      const dx = state.pointerX - line.x[seg];
+      const dy = state.pointerY - line.y[seg];
+      const distance = Math.hypot(dx, dy);
+      const radius = line.isFine ? 85 : 42;
+      return Math.max(0, 1 - distance / radius);
+    }
+
     function grabLine(index) {
       if (index < 0) return;
       const line = state.lines[index];
@@ -1088,19 +1162,17 @@
         if (state.cameraMask) state.cameraMask.fill(0);
         if (state.cameraMaskSmooth) state.cameraMaskSmooth.fill(0);
         state.cameraBgReady = true;
-        state.cameraScanEnabled = false;
-        scanBtn.textContent = "Escanear";
       }
     }
 
-    function updateLine(line, isHovered) {
+    function updateLine(line, hoverAmount) {
       line.influence *= 0.9;
       line.cameraDepth *= 0.92;
 
       const stiffness = line.isFine ? 0.24 : 0.30;
       const returnForceX = line.isFine ? 0.08 : 0.13;
       const returnForceY = line.isFine ? 0.08 : 0.13;
-      const damping = line.isFine ? 0.87 : 0.83;
+      const damping = line.isFine ? 0.92 : 0.90;
 
       for (let i = 1; i < state.segments - 1; i++) {
         if (line.grabbed && i === line.grabbedIndex) continue;
@@ -1113,39 +1185,39 @@
 
         if (state.cameraEnabled) {
           const cameraField = sampleCameraField(line.x[i], line.y[i]);
-          if (state.cameraScanEnabled) {
+          if (state.cameraBgReady) {
             const silhouetteForce = cameraField.mask;
-            const fineBoost = line.isFine ? 1.75 : 1.0;
+            const fineBoost = line.isFine ? 0.55 : 0.34;
             const bodyCenterX = state.boxX + state.cameraBodyX * state.boxWidth;
             const bodyCenterY = state.boxY + state.cameraBodyY * state.boxHeight;
             const dxBody = line.x[i] - bodyCenterX;
             const dyBody = line.y[i] - bodyCenterY;
             const bodyDistance = Math.hypot(dxBody, dyBody) || 1;
             const bodyFalloff = Math.max(0, 1 - bodyDistance / (Math.min(state.boxWidth, state.boxHeight) * 0.42));
-            const edgeRepelX = -cameraField.mx * 180;
-            const edgeRepelY = -cameraField.my * 180;
-            const bodyRepel = silhouetteForce * (line.isFine ? 42 : 28) * (0.5 + state.cameraBodyMass * 0.9);
+            const edgeRepelX = -cameraField.mx * 20;
+            const edgeRepelY = -cameraField.my * 20;
+            const bodyRepel = silhouetteForce * (line.isFine ? 4.8 : 3.2) * (0.22 + state.cameraBodyMass * 0.2);
             const interiorPushX = (dxBody / bodyDistance) * bodyRepel * bodyFalloff;
             const interiorPushY = (dyBody / bodyDistance) * bodyRepel * bodyFalloff;
-            const depthPush = cameraField.depth * (line.isFine ? 38 : 24);
-            line.vx[i] += (edgeRepelX + cameraField.gx * 22 + (0.5 - cameraField.luma) * 10) * silhouetteForce * fineBoost;
-            line.vy[i] += (edgeRepelY + cameraField.gy * 16) * silhouetteForce * fineBoost;
+            const depthPush = cameraField.depth * (line.isFine ? 4 : 2);
+            line.vx[i] += (edgeRepelX + cameraField.gx * 2.2 + (0.5 - cameraField.luma) * 0.8) * silhouetteForce * fineBoost;
+            line.vy[i] += (edgeRepelY + cameraField.gy * 1.8) * silhouetteForce * fineBoost;
             line.vx[i] += interiorPushX;
             line.vy[i] += interiorPushY;
             line.vx[i] += depthPush * ((i / (state.segments - 1)) - 0.5);
-            if (silhouetteForce > 0.24) {
-              line.x[i] += interiorPushX * 0.18;
-              line.y[i] += interiorPushY * 0.18;
+            if (silhouetteForce > 0.45) {
+              line.x[i] += interiorPushX * 0.015;
+              line.y[i] += interiorPushY * 0.015;
             }
             line.cameraDepth = Math.max(line.cameraDepth, cameraField.depth * fineBoost);
-            line.influence = Math.max(line.influence, Math.min(1, silhouetteForce * 1.35 + cameraField.motion * 1.8 + bodyFalloff * state.cameraBodyMass * 0.35));
+            line.influence = Math.max(line.influence, Math.min(0.14, silhouetteForce * 0.14 + cameraField.motion * 0.18 + bodyFalloff * state.cameraBodyMass * 0.03));
           } else {
-            const fineBoost = line.isFine ? 1.25 : 1.0;
-            const motionForce = cameraField.motion * 42;
-            line.vx[i] += (cameraField.gx * 26 + (0.5 - cameraField.luma) * 3.2) * fineBoost;
-            line.vy[i] += (cameraField.gy * 24 + motionForce * ((i / (state.segments - 1)) - 0.5)) * fineBoost;
-            line.cameraDepth = Math.max(line.cameraDepth, cameraField.motion * 1.4);
-            line.influence = Math.max(line.influence, Math.min(0.8, cameraField.motion * 3.2));
+            const fineBoost = line.isFine ? 0.4 : 0.32;
+            const motionForce = cameraField.motion * 3.2;
+            line.vx[i] += (cameraField.gx * 1.8 + (0.5 - cameraField.luma) * 0.28) * fineBoost;
+            line.vy[i] += (cameraField.gy * 1.8 + motionForce * ((i / (state.segments - 1)) - 0.5)) * fineBoost;
+            line.cameraDepth = Math.max(line.cameraDepth, cameraField.motion * 0.18);
+            line.influence = Math.max(line.influence, Math.min(0.08, cameraField.motion * 0.22));
           }
         }
 
@@ -1153,29 +1225,32 @@
         line.vy[i] *= damping;
       }
 
-      if (!line.grabbed && isHovered) {
+      if (!line.grabbed && hoverAmount > 0) {
         const seg = segmentIndexFromY(state.pointerY);
         const dx = state.pointerX - line.x[seg];
         const dy = state.pointerY - line.y[seg];
-        line.x[seg] += dx * 0.34;
-        line.y[seg] += dy * 0.34;
+        const lead = line.isFine ? 0.14 : 0.34;
+        const side1 = line.isFine ? 0.09 : 0.22;
+        const side2 = line.isFine ? 0.04 : 0.10;
+        line.x[seg] += dx * lead * hoverAmount;
+        line.y[seg] += dy * lead * hoverAmount;
         if (seg > 1) {
-          line.x[seg - 1] += dx * 0.22;
-          line.y[seg - 1] += dy * 0.22;
+          line.x[seg - 1] += dx * side1 * hoverAmount;
+          line.y[seg - 1] += dy * side1 * hoverAmount;
         }
         if (seg < state.segments - 2) {
-          line.x[seg + 1] += dx * 0.22;
-          line.y[seg + 1] += dy * 0.22;
+          line.x[seg + 1] += dx * side1 * hoverAmount;
+          line.y[seg + 1] += dy * side1 * hoverAmount;
         }
         if (seg > 2) {
-          line.x[seg - 2] += dx * 0.10;
-          line.y[seg - 2] += dy * 0.10;
+          line.x[seg - 2] += dx * side2 * hoverAmount;
+          line.y[seg - 2] += dy * side2 * hoverAmount;
         }
         if (seg < state.segments - 3) {
-          line.x[seg + 2] += dx * 0.10;
-          line.y[seg + 2] += dy * 0.10;
+          line.x[seg + 2] += dx * side2 * hoverAmount;
+          line.y[seg + 2] += dy * side2 * hoverAmount;
         }
-        line.influence = Math.max(line.influence, 0.18);
+        line.influence = Math.max(line.influence, line.isFine ? 0.08 * hoverAmount : 0.18);
       }
 
       if (line.grabbed) {
@@ -1226,7 +1301,13 @@
       }
       line.tension = Math.max(0, Math.min(1, maxStretch / (line.isFine ? 95 : 140)));
       const visualTension = Math.max(line.tension, line.influence);
-      line.thickness = line.isFine ? 1 : lerp(5, 80, visualTension);
+      if (line.isFine) {
+        line.thickness = 1;
+      } else if (state.cameraEnabled) {
+        line.thickness = 5;
+      } else {
+        line.thickness = lerp(5, 80, visualTension);
+      }
     }
 
     function applyCurtainEffect() {
@@ -1404,6 +1485,84 @@
       }
     }
 
+    function strokeSmoothLine2D(ctx, line, thickness, color, targetWidth, targetHeight) {
+      const view = getRenderView(targetWidth, targetHeight);
+      const subdivisions = Math.max(8, Math.ceil(Math.max(thickness * view.scale * 1.6, 16)));
+
+      ctx.save();
+      ctx.strokeStyle = colorToCss(color);
+      ctx.lineWidth = Math.max(1, thickness * view.scale);
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      ctx.beginPath();
+
+      const startX = view.offsetX + line.x[0] * view.scale;
+      const startY = view.offsetY + line.y[0] * view.scale;
+      ctx.moveTo(startX, startY);
+
+      for (let s = 0; s < state.segments - 1; s++) {
+        const p = getCurvePoint(line, s);
+        for (let step = 1; step <= subdivisions; step++) {
+          const t = step / subdivisions;
+          const nextX = catmullRom(line.x[p.i0], line.x[p.i1], line.x[p.i2], line.x[p.i3], t);
+          const nextY = catmullRom(line.y[p.i0], line.y[p.i1], line.y[p.i2], line.y[p.i3], t);
+          ctx.lineTo(
+            view.offsetX + nextX * view.scale,
+            view.offsetY + nextY * view.scale
+          );
+        }
+      }
+
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    function fillCircle2D(ctx, x, y, radius, color, targetWidth, targetHeight) {
+      const view = getRenderView(targetWidth, targetHeight);
+      ctx.save();
+      ctx.fillStyle = colorToCss(color);
+      ctx.beginPath();
+      ctx.arc(
+        view.offsetX + x * view.scale,
+        view.offsetY + y * view.scale,
+        radius * view.scale,
+        0,
+        Math.PI * 2
+      );
+      ctx.fill();
+      ctx.restore();
+    }
+
+    function renderLinesToCanvas2D(ctx, targetWidth, targetHeight) {
+      for (let i = 0; i < state.fineLineCount; i++) {
+        const line = state.fineLines[i];
+        const visual = Math.max(line.influence, line.cameraDepth * 0.8);
+        const color = state.cameraEnabled ? tensionColor(DARK_FINE, visual) : tensionColor(WHITE_SOFT, visual);
+        const thickness = 1.0 + line.cameraDepth * 0.9;
+        strokeSmoothLine2D(ctx, line, thickness * 0.7, color, targetWidth, targetHeight);
+      }
+
+      for (let i = 0; i < state.lineCount; i++) {
+        const line = state.lines[i];
+        const color = state.cameraEnabled
+          ? BLUE
+          : tensionColor(BLACK, Math.max(line.tension, line.influence, line.cameraDepth * 0.85));
+        strokeSmoothLine2D(ctx, line, line.thickness, color, targetWidth, targetHeight);
+
+        if (i === state.hoveredLine && state.grabbedLine === -1) {
+          fillCircle2D(ctx, line.anchorX, state.pointerY, 8, BLUE, targetWidth, targetHeight);
+          fillCircle2D(ctx, line.anchorX, state.pointerY, 3, [1, 1, 1, 1], targetWidth, targetHeight);
+        }
+
+        if (line.grabbed && line.grabbedIndex >= 0) {
+          const gx = line.x[line.grabbedIndex];
+          const gy = line.y[line.grabbedIndex];
+          fillCircle2D(ctx, gx, gy, 8, BLUE, targetWidth, targetHeight);
+          fillCircle2D(ctx, gx, gy, 3, [1, 1, 1, 1], targetWidth, targetHeight);
+        }
+      }
+    }
+
     function buildGeometry() {
       const pointVertices = [];
       const lineFillVertices = [];
@@ -1412,16 +1571,16 @@
       for (let i = 0; i < state.fineLineCount; i++) {
         const line = state.fineLines[i];
         const visual = Math.max(line.influence, line.cameraDepth * 0.8);
-        const baseColor = state.cameraEnabled ? WHITE_70 : WHITE_SOFT;
-        const color = tensionColor(baseColor, visual);
+        const color = state.cameraEnabled ? tensionColor(DARK_FINE, visual) : tensionColor(WHITE_SOFT, visual);
         const thickness = 1.0 + line.cameraDepth * 0.9;
-        pushSmoothLine(fineLineFillVertices, line, thickness * 0.5, color, 0.5);
+        pushSmoothLine(fineLineFillVertices, line, thickness * 0.35, color, 0.35);
       }
 
       for (let i = 0; i < state.lineCount; i++) {
         const line = state.lines[i];
-        const baseColor = state.cameraEnabled ? WHITE : BLACK;
-        const color = tensionColor(baseColor, Math.max(line.tension, line.influence, line.cameraDepth * 0.85));
+        const color = state.cameraEnabled
+          ? BLUE
+          : tensionColor(BLACK, Math.max(line.tension, line.influence, line.cameraDepth * 0.85));
         pushSmoothLine(lineFillVertices, line, line.thickness * 0.5, color);
 
         if (i === state.hoveredLine && state.grabbedLine === -1) {
@@ -1478,14 +1637,18 @@
       updateCameraFrame();
       findHoveredLine();
       for (let i = 0; i < state.fineLineCount; i++) {
-        updateLine(state.fineLines[i], false);
+        updateLine(state.fineLines[i], hoverAmountForLine(state.fineLines[i]));
       }
       for (let i = 0; i < state.lineCount; i++) {
-        updateLine(state.lines[i], i === state.hoveredLine);
+        updateLine(state.lines[i], i === state.hoveredLine ? 1 : hoverAmountForLine(state.lines[i]));
       }
       applyCurtainEffect();
       render();
-      requestAnimationFrame(frame);
+      if (state.recordingHighQuality) {
+        renderExportFrame();
+      }
+      updateRecordingHud();
+      state.rafId = requestAnimationFrame(frame);
     }
 
     function updatePointer(event) {
@@ -1519,12 +1682,29 @@
 
     window.addEventListener("resize", resize);
 
-    cameraBtn.addEventListener("click", () => {
-      toggleCamera();
+    window.addEventListener("keydown", (event) => {
+      if (event.code === "Space") {
+        event.preventDefault();
+        if (state.recordHotkeyDown) return;
+        state.recordHotkeyDown = true;
+        toggleRecordingHighQuality();
+        return;
+      }
+
+      if ((event.key === "s" || event.key === "S") && !event.repeat) {
+        event.preventDefault();
+        saveJpgFrame();
+      }
     });
 
-    scanBtn.addEventListener("click", () => {
-      scanPersonSilhouette();
+    window.addEventListener("keyup", (event) => {
+      if (event.code === "Space") {
+        state.recordHotkeyDown = false;
+      }
+    });
+
+    cameraBtn.addEventListener("click", () => {
+      toggleCamera();
     });
 
     resetBtn.addEventListener("click", () => {
@@ -1536,7 +1716,7 @@
     });
 
     recordBtn.addEventListener("click", () => {
-      toggleRecording();
+      toggleRecordingHighQuality();
     });
 
     cameraSelect.addEventListener("change", async () => {
@@ -1574,6 +1754,7 @@
       state.symbolContrast = Number(contrastSlider.value) / 100;
     });
 
+    updateRecordingHud();
     refreshVideoInputs();
     resize();
     frame();
