@@ -1,0 +1,1901 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Energia, por Nirlandy Pinheiro</title>
+  <style>
+    :root {
+      color-scheme: light;
+    }
+
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #fff;
+      font-family: sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .stage {
+      position: relative;
+      width: min(720px, 100vw);
+      aspect-ratio: 9 / 16;
+      height: auto;
+      max-height: 100dvh;
+      max-width: calc(100dvh * 9 / 16);
+      background: #fff;
+      overflow: hidden;
+    }
+
+    #cameraFx,
+    #gl {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+      touch-action: none;
+    }
+
+    #cameraFx {
+      z-index: 0;
+      display: none;
+      background: #fff;
+    }
+
+    body.camera-on #cameraFx {
+      display: block;
+    }
+
+    #gl {
+      cursor: default;
+      z-index: 3;
+    }
+
+    .controls {
+      position: fixed;
+      top: 28px;
+      left: 28px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      z-index: 12;
+      align-items: center;
+    }
+
+    .controls button,
+    .controls input,
+    .controls select {
+      border: 1px solid #000;
+      border-radius: 5px;
+      background: #000;
+      color: #fff;
+      padding: 10px 14px;
+      font: inherit;
+    }
+
+    .controls button {
+      cursor: pointer;
+    }
+
+    .controls input {
+      width: 120px;
+      outline: none;
+    }
+
+    .controls select {
+      max-width: 220px;
+      outline: none;
+    }
+
+    #cameraSelect {
+      display: none;
+    }
+
+    .controls input::placeholder {
+      color: rgba(255, 255, 255, 0.7);
+    }
+
+    .controls button:hover {
+      background: #111;
+      color: #fff;
+    }
+
+    .param-panel {
+      position: fixed;
+      top: 88px;
+      left: 28px;
+      z-index: 12;
+      display: grid;
+      gap: 8px;
+      padding: 12px 14px;
+      border: 1px solid #000;
+      border-radius: 10px;
+      background: rgba(0, 0, 0, 0.88);
+      color: #fff;
+      min-width: 220px;
+      backdrop-filter: blur(8px);
+    }
+
+    .param-panel label {
+      display: grid;
+      gap: 4px;
+      font-size: 12px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .param-panel input[type="range"] {
+      width: 100%;
+      padding: 0;
+      accent-color: #fff;
+    }
+
+    .hud {
+      position: fixed;
+      bottom: 24px;
+      z-index: 12;
+      padding: 0;
+      background: transparent;
+      color: #6a6a6a;
+      font-size: 12px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      line-height: 1.5;
+      font-weight: 700;
+    }
+
+    .hud-left {
+      left: 24px;
+    }
+
+    .hud-right {
+      right: 24px;
+      text-align: right;
+      min-width: 150px;
+    }
+
+    @media (max-width: 900px) and (pointer: coarse) {
+      .controls {
+        top: 12px;
+        left: 12px;
+        gap: 6px;
+      }
+
+      .controls button,
+      .controls input,
+      .controls select {
+        padding: 7px 9px;
+        font-size: 12px;
+      }
+
+      .controls input {
+        width: 92px;
+      }
+
+      .param-panel {
+        top: 54px;
+        left: 12px;
+        gap: 5px;
+        padding: 9px 10px;
+        min-width: 170px;
+      }
+
+      .param-panel label,
+      .hud {
+        font-size: 10px;
+      }
+
+      .hud-left {
+        left: 12px;
+      }
+
+      .hud-right {
+        right: 12px;
+        min-width: 120px;
+      }
+    }
+
+  </style>
+</head>
+<body>
+  <div class="controls">
+    <button id="cameraBtn" type="button">Camera</button>
+    <select id="cameraSelect" aria-label="Selecionar camera">
+      <option value="">Camera padrao</option>
+    </select>
+    <button id="resetBtn" type="button">Resetar</button>
+    <button id="saveBtn" type="button">Salvar JPG</button>
+    <button id="recordBtn" type="button">Gravar 4K HQ</button>
+  </div>
+  <div class="param-panel">
+    <label>Densidade <input id="densitySlider" type="range" min="8" max="28" value="12" /></label>
+    <label>Tamanho <input id="symbolSizeSlider" type="range" min="6" max="28" value="14" /></label>
+    <label>Mix <input id="symbolMixSlider" type="range" min="0" max="100" value="0" /></label>
+    <label>Velocidade <input id="speedSlider" type="range" min="0" max="100" value="0" /></label>
+    <label>Contraste <input id="contrastSlider" type="range" min="50" max="220" value="170" /></label>
+  </div>
+  <div class="stage">
+    <canvas id="cameraFx"></canvas>
+    <canvas id="gl"></canvas>
+  </div>
+  <div class="hud hud-left" id="legendHud">S salvar<br />SPACE gravar</div>
+  <div class="hud hud-right" id="recordHud">status: pronto<br />00:00</div>
+  <script>
+    const stage = document.querySelector(".stage");
+    const canvas = document.getElementById("gl");
+    const cameraFx = document.getElementById("cameraFx");
+    const cameraFxCtx = cameraFx.getContext("2d");
+    const cameraBtn = document.getElementById("cameraBtn");
+    const cameraSelect = document.getElementById("cameraSelect");
+    const resetBtn = document.getElementById("resetBtn");
+    const saveBtn = document.getElementById("saveBtn");
+    const recordBtn = document.getElementById("recordBtn");
+    const recordHud = document.getElementById("recordHud");
+    const densitySlider = document.getElementById("densitySlider");
+    const symbolSizeSlider = document.getElementById("symbolSizeSlider");
+    const symbolMixSlider = document.getElementById("symbolMixSlider");
+    const speedSlider = document.getElementById("speedSlider");
+    const contrastSlider = document.getElementById("contrastSlider");
+    const gl = canvas.getContext("webgl", {
+      antialias: true,
+      alpha: true,
+      premultipliedAlpha: false,
+      preserveDrawingBuffer: true
+    });
+
+    if (!gl) {
+      document.body.innerHTML = "<p style='padding:16px'>WebGL nao disponivel neste navegador.</p>";
+      throw new Error("WebGL unavailable");
+    }
+
+    const VERT_SRC = `
+      attribute vec2 a_position;
+      attribute vec4 a_color;
+      varying vec4 v_color;
+      void main() {
+        gl_Position = vec4(a_position, 0.0, 1.0);
+        v_color = a_color;
+      }
+    `;
+
+    const FRAG_SRC = `
+      precision mediump float;
+      varying vec4 v_color;
+      void main() {
+        gl_FragColor = v_color;
+      }
+    `;
+
+    function compileShader(type, source) {
+      const shader = gl.createShader(type);
+      gl.shaderSource(shader, source);
+      gl.compileShader(shader);
+      if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        throw new Error(gl.getShaderInfoLog(shader) || "Shader compile error");
+      }
+      return shader;
+    }
+
+    function createProgram(vertexSource, fragmentSource) {
+      const program = gl.createProgram();
+      gl.attachShader(program, compileShader(gl.VERTEX_SHADER, vertexSource));
+      gl.attachShader(program, compileShader(gl.FRAGMENT_SHADER, fragmentSource));
+      gl.linkProgram(program);
+      if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+        throw new Error(gl.getProgramInfoLog(program) || "Program link error");
+      }
+      return program;
+    }
+
+    const program = createProgram(VERT_SRC, FRAG_SRC);
+    gl.useProgram(program);
+
+    const aPosition = gl.getAttribLocation(program, "a_position");
+    const aColor = gl.getAttribLocation(program, "a_color");
+
+    const vertexBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
+    gl.enableVertexAttribArray(aPosition);
+    gl.vertexAttribPointer(aPosition, 2, gl.FLOAT, false, 24, 0);
+    gl.enableVertexAttribArray(aColor);
+    gl.vertexAttribPointer(aColor, 4, gl.FLOAT, false, 24, 8);
+
+    const WHITE = [1, 1, 1, 1];
+    const BLACK = [0, 0, 0, 1];
+    const WHITE_SOFT = [0, 0, 0, 0.28];
+    const DARK_FINE = [0.16, 0.16, 0.16, 0.82];
+    const BLUE = [40 / 255, 120 / 255, 1, 1];
+    const GREEN = [0 / 255, 242 / 255, 103 / 255, 1];
+    const MOBILE_MODE = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)
+      || (window.matchMedia("(max-width: 900px)").matches && window.matchMedia("(pointer: coarse)").matches);
+    const PERF = MOBILE_MODE
+      ? {
+          dprCap: 1,
+          lineCount: 4,
+          fineLineCount: 72,
+          segments: 28,
+          cameraWidth: 56,
+          cameraHeight: 96,
+          symbolDensity: 5,
+          symbolSize: 8,
+          symbolMix: 0,
+          symbolSpeed: 0,
+          symbolContrast: 1.2,
+          mainHoverRadius: 24,
+          fineHoverRadius: 40,
+          hoverForce: 0.42,
+          cameraForce: 0.22,
+          curtainForce: 0.38
+        }
+      : {
+          dprCap: 2,
+          lineCount: 10,
+          fineLineCount: 240,
+          segments: 72,
+          cameraWidth: 120,
+          cameraHeight: 200,
+          symbolDensity: 12,
+          symbolSize: 14,
+          symbolMix: 0,
+          symbolSpeed: 0,
+          symbolContrast: 1.7,
+          mainHoverRadius: 42,
+          fineHoverRadius: 85,
+          hoverForce: 1,
+          cameraForce: 1,
+          curtainForce: 1
+        };
+
+    const state = {
+      lineCount: PERF.lineCount,
+      fineLineCount: PERF.fineLineCount,
+      segments: PERF.segments,
+      grabRadius: 30,
+      hoverRadius: 40,
+      leftMargin: 0,
+      spacing: 0,
+      fineSpacing: 0,
+      boxX: 0,
+      boxY: 0,
+      boxWidth: 0,
+      boxHeight: 0,
+      lines: [],
+      fineLines: [],
+      hoveredLine: -1,
+      grabbedLine: -1,
+      pointerX: 0,
+      pointerY: 0,
+      pointerDown: false,
+      cameraEnabled: false,
+      selectedVideoDeviceId: "",
+      availableVideoInputs: [],
+      cameraVideo: null,
+      cameraStream: null,
+      cameraCanvas: null,
+      cameraCtx: null,
+      cameraWidth: PERF.cameraWidth,
+      cameraHeight: PERF.cameraHeight,
+      cameraLuma: null,
+      cameraBgLuma: null,
+      cameraPrevLuma: null,
+      cameraMotion: null,
+      cameraMask: null,
+      cameraMaskSmooth: null,
+      cameraBodyX: 0.5,
+      cameraBodyY: 0.5,
+      cameraBodyMass: 0,
+      cameraBgReady: false,
+      exportCanvas: null,
+      exportCtx: null,
+      recordStream: null,
+      recorder: null,
+      recordedChunks: [],
+      recordingHighQuality: false,
+      recordingStartedAt: 0,
+      recordHotkeyDown: false,
+      rafId: 0,
+      time: 0,
+      symbolDensity: PERF.symbolDensity,
+      symbolSize: PERF.symbolSize,
+      symbolMix: PERF.symbolMix,
+      symbolSpeed: PERF.symbolSpeed,
+      symbolContrast: PERF.symbolContrast,
+      dpr: 1,
+      width: 1,
+      height: 1
+    };
+
+    function lerp(a, b, t) {
+      return a + (b - a) * t;
+    }
+
+    function mixColor(a, b, t) {
+      return [
+        lerp(a[0], b[0], t),
+        lerp(a[1], b[1], t),
+        lerp(a[2], b[2], t),
+        lerp(a[3] === undefined ? 1 : a[3], b[3] === undefined ? 1 : b[3], t)
+      ];
+    }
+
+    function tensionColor(baseColor, intensity) {
+      const clamped = Math.max(0, Math.min(1, intensity));
+      if (clamped < 0.6) {
+        return mixColor(baseColor, BLUE, clamped / 0.6);
+      }
+      return mixColor(BLUE, GREEN, (clamped - 0.6) / 0.4);
+    }
+
+    function fract(value) {
+      return value - Math.floor(value);
+    }
+
+    function hashNoise(x, y, t = 0) {
+      return fract(Math.sin(x * 127.1 + y * 311.7 + t * 74.7) * 43758.5453123);
+    }
+
+    function clamp(value, min, max) {
+      return Math.max(min, Math.min(max, value));
+    }
+
+    function drawVideoCoverMirrored(ctx, video, destWidth, destHeight) {
+      const sourceWidth = video.videoWidth || destWidth;
+      const sourceHeight = video.videoHeight || destHeight;
+      const sourceAspect = sourceWidth / Math.max(1, sourceHeight);
+      const destAspect = destWidth / Math.max(1, destHeight);
+
+      let drawWidth = destWidth;
+      let drawHeight = destHeight;
+      let offsetX = 0;
+      let offsetY = 0;
+
+      if (sourceAspect > destAspect) {
+        drawHeight = destHeight;
+        drawWidth = drawHeight * sourceAspect;
+        offsetX = (destWidth - drawWidth) * 0.5;
+      } else {
+        drawWidth = destWidth;
+        drawHeight = drawWidth / sourceAspect;
+        offsetY = (destHeight - drawHeight) * 0.5;
+      }
+
+      ctx.save();
+      ctx.fillStyle = "#f5f1e9";
+      ctx.fillRect(0, 0, destWidth, destHeight);
+      ctx.translate(destWidth, 0);
+      ctx.scale(-1, 1);
+      ctx.drawImage(video, destWidth - offsetX - drawWidth, offsetY, drawWidth, drawHeight);
+      ctx.restore();
+    }
+
+    function clearCameraState() {
+      document.body.classList.remove("camera-on");
+      state.cameraEnabled = false;
+      state.cameraStream = null;
+      state.cameraVideo = null;
+      state.cameraCanvas = null;
+      state.cameraCtx = null;
+      state.cameraLuma = null;
+      state.cameraBgLuma = null;
+      state.cameraPrevLuma = null;
+      state.cameraMotion = null;
+      state.cameraMask = null;
+      state.cameraMaskSmooth = null;
+      state.cameraBgReady = false;
+      cameraFx.style.display = "none";
+      cameraFxCtx.clearRect(0, 0, cameraFx.width, cameraFx.height);
+      cameraBtn.textContent = "Camera";
+    }
+
+    function stopCameraStream() {
+      if (!state.cameraStream) return;
+      for (const track of state.cameraStream.getTracks()) {
+        track.stop();
+      }
+      state.cameraStream = null;
+    }
+
+    async function refreshVideoInputs() {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
+
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        state.availableVideoInputs = devices.filter((device) => device.kind === "videoinput");
+        const previousValue = state.selectedVideoDeviceId;
+
+        cameraSelect.innerHTML = "";
+
+        if (state.availableVideoInputs.length === 0) {
+          const option = document.createElement("option");
+          option.value = "";
+          option.textContent = "Sem camera";
+          cameraSelect.appendChild(option);
+          cameraSelect.value = "";
+          return;
+        }
+
+        const defaultOption = document.createElement("option");
+        defaultOption.value = "";
+        defaultOption.textContent = "Camera padrao";
+        cameraSelect.appendChild(defaultOption);
+
+        state.availableVideoInputs.forEach((device, index) => {
+          const option = document.createElement("option");
+          option.value = device.deviceId;
+          option.textContent = device.label || `Camera ${index + 1}`;
+          cameraSelect.appendChild(option);
+        });
+
+        const stillAvailable = state.availableVideoInputs.some((device) => device.deviceId === previousValue);
+        state.selectedVideoDeviceId = stillAvailable ? previousValue : "";
+        cameraSelect.value = state.selectedVideoDeviceId;
+      } catch (error) {
+        // Ignore device listing issues and keep the default selector option.
+      }
+    }
+
+    async function startCameraStream() {
+      const videoConstraints = state.selectedVideoDeviceId
+        ? { deviceId: { exact: state.selectedVideoDeviceId } }
+        : { facingMode: "user" };
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: videoConstraints,
+        audio: false
+      });
+
+      const video = document.createElement("video");
+      video.autoplay = true;
+      video.muted = true;
+      video.playsInline = true;
+      video.srcObject = stream;
+
+      const offscreen = document.createElement("canvas");
+      offscreen.width = state.cameraWidth;
+      offscreen.height = state.cameraHeight;
+      const ctx = offscreen.getContext("2d", { willReadFrequently: true });
+
+      state.cameraStream = stream;
+      state.cameraVideo = video;
+      state.cameraCanvas = offscreen;
+      state.cameraCtx = ctx;
+      state.cameraLuma = new Float32Array(state.cameraWidth * state.cameraHeight);
+      state.cameraBgLuma = new Float32Array(state.cameraWidth * state.cameraHeight);
+      state.cameraPrevLuma = new Float32Array(state.cameraWidth * state.cameraHeight);
+      state.cameraMotion = new Float32Array(state.cameraWidth * state.cameraHeight);
+      state.cameraMask = new Float32Array(state.cameraWidth * state.cameraHeight);
+      state.cameraMaskSmooth = new Float32Array(state.cameraWidth * state.cameraHeight);
+      state.cameraEnabled = true;
+      state.cameraBgReady = false;
+      document.body.classList.add("camera-on");
+      cameraFx.style.display = "block";
+      cameraBtn.textContent = "Camera On";
+
+      await video.play();
+      renderCameraBackground();
+      await refreshVideoInputs();
+    }
+
+    async function toggleCamera() {
+      if (state.cameraEnabled) {
+        stopCameraStream();
+        clearCameraState();
+        return;
+      }
+
+      try {
+        await startCameraStream();
+      } catch (error) {
+        clearCameraState();
+      }
+    }
+
+    function updateCameraFrame() {
+      if (!state.cameraEnabled || !state.cameraVideo || !state.cameraCtx) return;
+      if (state.cameraVideo.readyState < 2) return;
+
+      const ctx = state.cameraCtx;
+      drawVideoCoverMirrored(ctx, state.cameraVideo, state.cameraWidth, state.cameraHeight);
+
+      const imageData = ctx.getImageData(0, 0, state.cameraWidth, state.cameraHeight);
+      const data = imageData.data;
+      const total = state.cameraWidth * state.cameraHeight;
+      let bodySum = 0;
+      let bodyX = 0;
+      let bodyY = 0;
+
+      for (let i = 0; i < total; i++) {
+        const idx = i * 4;
+        const luma = (data[idx] * 0.2126 + data[idx + 1] * 0.7152 + data[idx + 2] * 0.0722) / 255;
+        const previous = state.cameraLuma[i];
+        state.cameraMotion[i] = Math.abs(luma - previous);
+        state.cameraPrevLuma[i] = previous;
+        state.cameraLuma[i] = luma;
+
+        if (!state.cameraBgReady) {
+          state.cameraBgLuma[i] = luma;
+          state.cameraMask[i] = 0;
+          continue;
+        }
+
+        const bg = state.cameraBgLuma[i];
+        const diff = Math.abs(luma - bg);
+        const motionBoost = Math.min(0.22, state.cameraMotion[i] * 2.0);
+        const mask = Math.max(0, Math.min(1, (diff - 0.05 + motionBoost) / 0.14));
+        state.cameraMask[i] = mask;
+        if (mask > 0.08) {
+          const px = i % state.cameraWidth;
+          const py = Math.floor(i / state.cameraWidth);
+          bodySum += mask;
+          bodyX += px * mask;
+          bodyY += py * mask;
+        }
+
+        const learnRate = mask > 0.12 ? 0.001 : 0.02;
+        state.cameraBgLuma[i] = lerp(bg, luma, learnRate);
+      }
+
+      if (state.cameraMask && state.cameraMaskSmooth) {
+        for (let y = 1; y < state.cameraHeight - 1; y++) {
+          for (let x = 1; x < state.cameraWidth - 1; x++) {
+            const index = y * state.cameraWidth + x;
+            let sum = state.cameraMask[index] * 4.0;
+            sum += state.cameraMask[index - 1];
+            sum += state.cameraMask[index + 1];
+            sum += state.cameraMask[index - state.cameraWidth];
+            sum += state.cameraMask[index + state.cameraWidth];
+            state.cameraMaskSmooth[index] = sum / 8.0;
+          }
+        }
+      }
+
+      if (!state.cameraBgReady) {
+        state.cameraBgReady = true;
+      }
+
+      if (bodySum > 0.0001) {
+        state.cameraBodyX = bodyX / bodySum / Math.max(1, state.cameraWidth - 1);
+        state.cameraBodyY = bodyY / bodySum / Math.max(1, state.cameraHeight - 1);
+        state.cameraBodyMass = Math.min(1, bodySum / (state.cameraWidth * state.cameraHeight * 0.18));
+      } else {
+        state.cameraBodyMass *= 0.92;
+      }
+
+      renderCameraBackground();
+    }
+
+    function sampleField(buffer, x, y) {
+      if (!buffer) return 0;
+      const clampedX = Math.max(0, Math.min(state.cameraWidth - 1, x));
+      const clampedY = Math.max(0, Math.min(state.cameraHeight - 1, y));
+      const x0 = Math.floor(clampedX);
+      const y0 = Math.floor(clampedY);
+      const x1 = Math.min(state.cameraWidth - 1, x0 + 1);
+      const y1 = Math.min(state.cameraHeight - 1, y0 + 1);
+      const tx = clampedX - x0;
+      const ty = clampedY - y0;
+
+      const i00 = y0 * state.cameraWidth + x0;
+      const i10 = y0 * state.cameraWidth + x1;
+      const i01 = y1 * state.cameraWidth + x0;
+      const i11 = y1 * state.cameraWidth + x1;
+
+      const top = lerp(buffer[i00], buffer[i10], tx);
+      const bottom = lerp(buffer[i01], buffer[i11], tx);
+      return lerp(top, bottom, ty);
+    }
+
+    function sampleLumaField(x, y) {
+      return sampleField(state.cameraLuma, x, y);
+    }
+
+    function sampleMaskField(x, y) {
+      return sampleField(state.cameraMaskSmooth || state.cameraMask, x, y);
+    }
+
+    function sampleGradientField(x, y) {
+      const eps = 1.0;
+      const gx = sampleLumaField(x + eps, y) - sampleLumaField(x - eps, y);
+      const gy = sampleLumaField(x, y + eps) - sampleLumaField(x, y - eps);
+      return { gx, gy };
+    }
+
+    function drawSymbol(ctx, symbolIndex, size) {
+      const h = size * 0.5;
+      const r = size * 0.38;
+
+      if (symbolIndex === 0) {
+        ctx.rect(-h, -h, size, size);
+        return;
+      }
+
+      if (symbolIndex === 1) {
+        ctx.moveTo(-h, -h);
+        ctx.lineTo(h, h);
+        ctx.moveTo(h, -h);
+        ctx.lineTo(-h, h);
+        return;
+      }
+
+      if (symbolIndex === 2) {
+        ctx.moveTo(-h, 0);
+        ctx.lineTo(h, 0);
+        ctx.moveTo(0, -h);
+        ctx.lineTo(0, h);
+        return;
+      }
+
+      if (symbolIndex === 3) {
+        ctx.arc(0, 0, r, 0, Math.PI * 2);
+        return;
+      }
+
+      ctx.moveTo(-h, h);
+      ctx.lineTo(h, -h);
+    }
+
+    function chooseSymbolIndex(luma, mixNoise) {
+      const bins = [
+        0.18 + state.symbolMix * 0.08,
+        0.36 + state.symbolMix * 0.06,
+        0.54 + state.symbolMix * 0.02,
+        0.74 - state.symbolMix * 0.04
+      ];
+
+      const weighted = clamp(luma + (mixNoise - 0.5) * state.symbolMix * 0.22, 0, 1);
+      if (weighted < bins[0]) return 0;
+      if (weighted < bins[1]) return 1;
+      if (weighted < bins[2]) return 2;
+      if (weighted < bins[3]) return 3;
+      return 4;
+    }
+
+    function getRenderView(targetWidth, targetHeight) {
+      const scale = Math.min(
+        targetWidth / Math.max(1, state.width),
+        targetHeight / Math.max(1, state.height)
+      );
+      const offsetX = (targetWidth - state.width * scale) * 0.5;
+      const offsetY = (targetHeight - state.height * scale) * 0.5;
+      return {
+        scale,
+        offsetX,
+        offsetY,
+        renderX: offsetX + state.boxX * scale,
+        renderY: offsetY + state.boxY * scale,
+        renderWidth: state.boxWidth * scale,
+        renderHeight: state.boxHeight * scale,
+        pointerX: offsetX + state.pointerX * scale,
+        pointerY: offsetY + state.pointerY * scale
+      };
+    }
+
+    function colorToCss(color) {
+      const r = Math.round(clamp(color[0], 0, 1) * 255);
+      const g = Math.round(clamp(color[1], 0, 1) * 255);
+      const b = Math.round(clamp(color[2], 0, 1) * 255);
+      const a = color[3] === undefined ? 1 : clamp(color[3], 0, 1);
+      return `rgba(${r}, ${g}, ${b}, ${a})`;
+    }
+
+    function renderCameraBackgroundTo(ctx, targetWidth, targetHeight) {
+      const view = getRenderView(targetWidth, targetHeight);
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, targetWidth, targetHeight);
+      ctx.fillStyle = "rgb(245, 241, 233)";
+      ctx.fillRect(0, 0, targetWidth, targetHeight);
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+
+      const time = state.time * (0.002 + state.symbolSpeed * 0.04);
+      const cols = Math.max(MOBILE_MODE ? 3 : 6, Math.round(state.symbolDensity * (MOBILE_MODE ? 2.8 : 7)));
+      const cell = view.renderWidth / cols;
+      const rows = Math.ceil(view.renderHeight / cell);
+      const baseSize = cell * (0.24 + state.symbolSize / 10);
+
+      for (let row = 0; row < rows; row++) {
+        for (let col = 0; col < cols; col++) {
+          const gridNoise = hashNoise(col * 1.71, row * 2.13, 0);
+          const jitterX = (gridNoise - 0.5) * cell * 0.16;
+          const jitterY = (hashNoise(col * 2.91, row * 1.33, 0) - 0.5) * cell * 0.16;
+          const px = view.renderX + (col + 0.5) * cell + jitterX;
+          const py = view.renderY + (row + 0.5) * cell + jitterY;
+
+          const sx = ((px - view.renderX) / Math.max(1, view.renderWidth)) * state.cameraWidth;
+          const sy = ((py - view.renderY) / Math.max(1, view.renderHeight)) * state.cameraHeight;
+          const luma = sampleLumaField(sx, sy);
+          const motion = sampleField(state.cameraMotion, sx, sy);
+          const grad = sampleGradientField(sx, sy);
+          const gradMag = Math.hypot(grad.gx, grad.gy);
+          const contrastLuma = clamp((luma - 0.5) * state.symbolContrast + 0.5, 0, 1);
+          const density = 0.12 + (1 - contrastLuma) * 0.88;
+          const keep = hashNoise(col * 3.21, row * 4.37, 1.0) < density * (MOBILE_MODE ? 0.54 : 0.86);
+
+          if (!keep) continue;
+
+          const angleBase = Math.atan2(grad.gy, grad.gx);
+          const angle = angleBase + (hashNoise(col * 1.4, row * 1.6, 2.0) - 0.5) * 0.18;
+          const pulse = 0.96 + Math.sin(time * 1.4 + col * 0.23 + row * 0.19) * (0.02 + state.symbolSpeed * 0.07 + motion * 0.05);
+          const localSize = baseSize * pulse * (0.88 + (1 - contrastLuma) * 0.34);
+          const mixNoise = hashNoise(col * 0.71, row * 0.93, time * 0.7);
+          const symbolIndex = chooseSymbolIndex(contrastLuma, mixNoise);
+          const darkness = 14 + (1 - contrastLuma) * 46;
+          const alpha = 0.24 + (1 - contrastLuma) * 0.54 + gradMag * 3.0;
+          const stroke = Math.max(1, localSize * (0.065 + gradMag * 0.7));
+          const hoverDist = Math.hypot(px - view.pointerX, py - view.pointerY);
+          const hoverRange = cell * 1.35;
+          const hoverMix = clamp(1 - hoverDist / hoverRange, 0, 1);
+          const baseColor = [darkness, darkness - 2, darkness - 5];
+          const hoverColor = [255, 105, 105];
+          const strokeColor = [
+            Math.round(lerp(baseColor[0], hoverColor[0], hoverMix)),
+            Math.round(lerp(baseColor[1], hoverColor[1], hoverMix)),
+            Math.round(lerp(baseColor[2], hoverColor[2], hoverMix))
+          ];
+          const strokeAlpha = clamp(alpha + hoverMix * 0.28, 0.18, 0.98);
+
+          ctx.save();
+          ctx.translate(px, py);
+          ctx.rotate(angle + Math.sin(time * 0.9 + col * 0.18 + row * 0.16) * (0.008 + state.symbolSpeed * 0.05));
+          ctx.strokeStyle = `rgba(${strokeColor[0]}, ${strokeColor[1]}, ${strokeColor[2]}, ${strokeAlpha})`;
+          ctx.lineWidth = stroke * (1 + hoverMix * 0.32);
+          ctx.beginPath();
+          drawSymbol(ctx, symbolIndex, localSize);
+          ctx.stroke();
+          ctx.restore();
+        }
+      }
+    }
+
+    function renderCameraBackground() {
+      renderCameraBackgroundTo(cameraFxCtx, cameraFx.width, cameraFx.height);
+    }
+
+    function sampleCameraField(x, y) {
+      if (!state.cameraEnabled || !state.cameraLuma) {
+        return { luma: 0.5, motion: 0, gx: 0, gy: 0, mask: 0, mx: 0, my: 0, depth: 0 };
+      }
+
+      const u = Math.max(0, Math.min(1, (x - state.boxX) / Math.max(1, state.boxWidth)));
+      const v = Math.max(0, Math.min(1, (y - state.boxY) / Math.max(1, state.boxHeight)));
+      const px = Math.max(1, Math.min(state.cameraWidth - 2, Math.round(u * (state.cameraWidth - 1))));
+      const py = Math.max(1, Math.min(state.cameraHeight - 2, Math.round(v * (state.cameraHeight - 1))));
+      const index = py * state.cameraWidth + px;
+      const left = index - 1;
+      const right = index + 1;
+      const up = index - state.cameraWidth;
+      const down = index + state.cameraWidth;
+
+      const luma = state.cameraLuma[index];
+      const motion = state.cameraMotion[index];
+      const gx = state.cameraLuma[right] - state.cameraLuma[left];
+      const gy = state.cameraLuma[down] - state.cameraLuma[up];
+      const maskSource = state.cameraMaskSmooth || state.cameraMask;
+      const mask = maskSource ? maskSource[index] : 0;
+      const mx = maskSource ? maskSource[right] - maskSource[left] : 0;
+      const my = maskSource ? maskSource[down] - maskSource[up] : 0;
+      const depth = Math.max(0, Math.min(1, mask * 0.8 + motion * 1.4));
+
+      return { luma, motion, gx, gy, mask, mx, my, depth };
+    }
+
+    function saveJpgFrame() {
+      const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+      const exportWidth = MOBILE_MODE ? 1080 : 3840;
+      const exportHeight = MOBILE_MODE ? 1920 : 2160;
+      ensureExportCanvas(exportWidth, exportHeight);
+      drawCompositeFrame(state.exportCtx, state.exportCanvas.width, state.exportCanvas.height);
+
+      if (MOBILE_MODE && state.exportCanvas.toBlob) {
+        state.exportCanvas.toBlob(async (blob) => {
+          if (!blob) return;
+
+          const file = new File([blob], `energia-${stamp}.jpg`, { type: "image/jpeg" });
+          if (navigator.canShare && navigator.canShare({ files: [file] })) {
+            try {
+              await navigator.share({
+                files: [file],
+                title: "Energia, por Nirlandy Pinheiro"
+              });
+              return;
+            } catch (error) {
+              if (error && error.name === "AbortError") return;
+            }
+          }
+
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement("a");
+          link.href = url;
+          link.download = file.name;
+          link.click();
+          setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }, "image/jpeg", 0.94);
+        return;
+      }
+
+      const link = document.createElement("a");
+      link.href = state.exportCanvas.toDataURL("image/jpeg", 0.96);
+      link.download = `energia-4k-${stamp}.jpg`;
+      link.click();
+    }
+
+    function formatRecordingTime(ms) {
+      const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+      const minutes = String(Math.floor(totalSeconds / 60)).padStart(2, "0");
+      const seconds = String(totalSeconds % 60).padStart(2, "0");
+      return `${minutes}:${seconds}`;
+    }
+
+    function updateRecordingHud() {
+      if (state.recordingHighQuality) {
+        const elapsed = performance.now() - state.recordingStartedAt;
+        recordHud.innerHTML = `status: gravando<br />${formatRecordingTime(elapsed)}`;
+      } else {
+        recordHud.innerHTML = "status: pronto<br />00:00";
+      }
+    }
+
+    function drawCompositeFrame(targetCtx, width, height) {
+      if (!targetCtx) return;
+      targetCtx.clearRect(0, 0, width, height);
+      if (state.cameraEnabled && width !== cameraFx.width) {
+        renderCameraBackgroundTo(targetCtx, width, height);
+      } else if (state.cameraEnabled && cameraFx.width > 0 && cameraFx.height > 0) {
+        targetCtx.drawImage(cameraFx, 0, 0, width, height);
+      } else {
+        targetCtx.fillStyle = "#ffffff";
+        targetCtx.fillRect(0, 0, width, height);
+      }
+      if (width !== canvas.width) {
+        renderLinesToCanvas2D(targetCtx, width, height);
+      } else {
+        targetCtx.drawImage(canvas, 0, 0, width, height);
+      }
+    }
+
+    function ensureExportCanvas(width = 3840, height = 2160) {
+      if (!state.exportCanvas) {
+        state.exportCanvas = document.createElement("canvas");
+        state.exportCtx = state.exportCanvas.getContext("2d", { alpha: false });
+      }
+      state.exportCanvas.width = width;
+      state.exportCanvas.height = height;
+    }
+
+    function renderExportFrame() {
+      if (!state.exportCtx || !state.exportCanvas) return;
+      drawCompositeFrame(state.exportCtx, state.exportCanvas.width, state.exportCanvas.height);
+    }
+
+    async function toggleRecordingHighQuality() {
+      if (state.recordingHighQuality && state.recorder) {
+        state.recorder.stop();
+        return;
+      }
+
+      try {
+        ensureExportCanvas(3840, 2160);
+        renderExportFrame();
+
+        const stream = state.exportCanvas.captureStream(30);
+        let mimeType = "";
+        if (MediaRecorder.isTypeSupported("video/webm;codecs=vp9")) {
+          mimeType = "video/webm;codecs=vp9";
+        } else if (MediaRecorder.isTypeSupported("video/webm;codecs=vp8")) {
+          mimeType = "video/webm;codecs=vp8";
+        } else if (MediaRecorder.isTypeSupported("video/webm")) {
+          mimeType = "video/webm";
+        }
+
+        const recorderOptions = mimeType
+          ? {
+              mimeType,
+              videoBitsPerSecond: 80000000
+            }
+          : {
+              videoBitsPerSecond: 80000000
+            };
+
+        state.recordedChunks = [];
+        state.recordStream = stream;
+        state.recorder = new MediaRecorder(stream, recorderOptions);
+        state.recordingHighQuality = true;
+        state.recordingStartedAt = performance.now();
+        recordBtn.textContent = "Parar 4K HQ";
+        updateRecordingHud();
+
+        state.recorder.ondataavailable = (event) => {
+          if (event.data && event.data.size > 0) {
+            state.recordedChunks.push(event.data);
+          }
+        };
+
+        state.recorder.onstop = () => {
+          const finalMimeType = mimeType || "video/webm";
+          const blob = new Blob(state.recordedChunks, { type: finalMimeType });
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement("a");
+          const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+          link.href = url;
+          link.download = `energia-4k-hq-${stamp}.webm`;
+          link.click();
+          setTimeout(() => URL.revokeObjectURL(url), 1000);
+
+          if (state.recordStream) {
+            for (const track of state.recordStream.getTracks()) {
+              track.stop();
+            }
+          }
+
+          state.recordStream = null;
+          state.recorder = null;
+          state.recordedChunks = [];
+          state.recordingHighQuality = false;
+          state.recordingStartedAt = 0;
+          recordBtn.textContent = "Gravar 4K HQ";
+          updateRecordingHud();
+        };
+
+        state.recorder.start(250);
+      } catch (error) {
+        if (state.recordStream) {
+          for (const track of state.recordStream.getTracks()) {
+            track.stop();
+          }
+        }
+        state.recordStream = null;
+        state.recorder = null;
+        state.recordedChunks = [];
+        state.recordingHighQuality = false;
+        state.recordingStartedAt = 0;
+        recordBtn.textContent = "Gravar 4K HQ";
+        updateRecordingHud();
+      }
+    }
+
+    function createLine(anchorX, isFine = false) {
+      const x = new Float32Array(state.segments);
+      const restX = new Float32Array(state.segments);
+      const vx = new Float32Array(state.segments);
+      const y = new Float32Array(state.segments);
+      const vy = new Float32Array(state.segments);
+      const restY = new Float32Array(state.segments);
+      for (let i = 0; i < state.segments; i++) {
+        const py = state.boxY + (i / (state.segments - 1)) * state.boxHeight;
+        x[i] = anchorX;
+        restX[i] = anchorX;
+        vx[i] = 0;
+        y[i] = py;
+        vy[i] = 0;
+        restY[i] = py;
+      }
+      return {
+        anchorX,
+        x,
+        restX,
+        vx,
+        y,
+        vy,
+        restY,
+        grabbed: false,
+        grabbedIndex: -1,
+        tension: 0,
+        thickness: isFine ? 1 : 5,
+        influence: 0,
+        cameraDepth: 0,
+        isFine
+      };
+    }
+
+    function copyLineShape(source, target) {
+      const sourceMax = source.length - 1;
+      const targetMax = target.length - 1;
+
+      for (let i = 0; i < target.length; i++) {
+        const t = targetMax <= 0 ? 0 : i / targetMax;
+        const sourceIndex = t * sourceMax;
+        const left = Math.floor(sourceIndex);
+        const right = Math.min(sourceMax, left + 1);
+        const mix = sourceIndex - left;
+
+        target[i].x.set(source[left].x);
+        target[i].restX.set(source[left].restX);
+        target[i].vx.set(source[left].vx);
+        target[i].y.set(source[left].y);
+        target[i].vy.set(source[left].vy);
+        target[i].restY.set(source[left].restY);
+
+        if (right !== left) {
+          for (let s = 0; s < state.segments; s++) {
+            target[i].x[s] = lerp(source[left].x[s], source[right].x[s], mix);
+            target[i].restX[s] = lerp(source[left].restX[s], source[right].restX[s], mix);
+            target[i].vx[s] = lerp(source[left].vx[s], source[right].vx[s], mix);
+            target[i].y[s] = lerp(source[left].y[s], source[right].y[s], mix);
+            target[i].vy[s] = lerp(source[left].vy[s], source[right].vy[s], mix);
+            target[i].restY[s] = lerp(source[left].restY[s], source[right].restY[s], mix);
+          }
+        }
+
+        target[i].anchorX = lerp(source[left].anchorX, source[right].anchorX, mix);
+        target[i].grabbed = false;
+        target[i].grabbedIndex = -1;
+        target[i].tension = lerp(source[left].tension, source[right].tension, mix);
+        target[i].thickness = lerp(source[left].thickness, source[right].thickness, mix);
+        target[i].influence = lerp(source[left].influence, source[right].influence, mix);
+        target[i].cameraDepth = lerp(source[left].cameraDepth || 0, source[right].cameraDepth || 0, mix);
+      }
+    }
+
+    function rebuildLines() {
+      const previousLines = state.lines;
+      const previousFineLines = state.fineLines;
+      const previousGrabbedRatio = previousLines.length > 1 && state.grabbedLine >= 0
+        ? state.grabbedLine / (previousLines.length - 1)
+        : -1;
+
+      state.boxX = 0;
+      state.boxY = 0;
+      state.boxWidth = state.width;
+      state.boxHeight = state.height;
+
+      state.leftMargin = state.width * 0.06;
+      state.spacing = state.lineCount > 1 ? (state.width * 0.88) / (state.lineCount - 1) : 0;
+      state.fineSpacing = state.fineLineCount > 1 ? state.width / (state.fineLineCount - 1) : 0;
+      state.lines = [];
+      state.fineLines = [];
+      for (let i = 0; i < state.lineCount; i++) {
+        const x = state.lineCount <= 1 ? state.width * 0.5 : state.leftMargin + i * state.spacing;
+        state.lines.push(createLine(x, false));
+      }
+      for (let i = 0; i < state.fineLineCount; i++) {
+        const x = state.fineLineCount <= 1 ? state.width * 0.5 : i * state.fineSpacing;
+        state.fineLines.push(createLine(x, true));
+      }
+
+      if (previousLines.length > 0 && state.lines.length > 0) {
+        copyLineShape(previousLines, state.lines);
+      }
+
+      if (previousFineLines.length > 0 && state.fineLines.length > 0) {
+        copyLineShape(previousFineLines, state.fineLines);
+      }
+
+      if (previousGrabbedRatio >= 0 && state.lines.length > 0) {
+        state.grabbedLine = Math.round(previousGrabbedRatio * (state.lines.length - 1));
+      } else if (state.grabbedLine >= state.lines.length) {
+        state.grabbedLine = -1;
+      }
+
+      if (state.hoveredLine >= state.lines.length) {
+        state.hoveredLine = -1;
+      }
+    }
+
+    function resize() {
+      state.dpr = Math.min(window.devicePixelRatio || 1, PERF.dprCap);
+      const cssWidth = Math.max(1, Math.round(stage.clientWidth || 720));
+      const cssHeight = Math.max(1, Math.round(stage.clientHeight || 1280));
+      cameraFx.width = Math.floor(cssWidth * state.dpr);
+      cameraFx.height = Math.floor(cssHeight * state.dpr);
+      cameraFx.style.width = cssWidth + "px";
+      cameraFx.style.height = cssHeight + "px";
+      canvas.width = Math.floor(cssWidth * state.dpr);
+      canvas.height = Math.floor(cssHeight * state.dpr);
+      canvas.style.width = cssWidth + "px";
+      canvas.style.height = cssHeight + "px";
+      gl.viewport(0, 0, canvas.width, canvas.height);
+      state.width = cssWidth;
+      state.height = cssHeight;
+      rebuildLines();
+    }
+
+    function findHoveredLine() {
+      if (state.lineCount === 0) {
+        state.hoveredLine = -1;
+        return;
+      }
+
+      let best = -1;
+      let bestDist = state.hoverRadius;
+      const seg = segmentIndexFromY(state.pointerY);
+      for (let i = 0; i < state.lineCount; i++) {
+        const dist = Math.abs(state.pointerX - state.lines[i].x[seg]);
+        if (dist < bestDist) {
+          bestDist = dist;
+          best = i;
+        }
+      }
+      state.hoveredLine = best;
+    }
+
+    function segmentIndexFromY(y) {
+      const clamped = Math.max(state.boxY, Math.min(state.boxY + state.boxHeight, y));
+      const localY = clamped - state.boxY;
+      const raw = Math.round((localY / state.boxHeight) * (state.segments - 1));
+      return Math.max(1, Math.min(state.segments - 2, raw));
+    }
+
+    function hoverAmountForLine(line) {
+      const seg = segmentIndexFromY(state.pointerY);
+      const dx = state.pointerX - line.x[seg];
+      const dy = state.pointerY - line.y[seg];
+      const distance = Math.hypot(dx, dy);
+      const radius = line.isFine ? PERF.fineHoverRadius : PERF.mainHoverRadius;
+      return Math.max(0, 1 - distance / radius);
+    }
+
+    function grabLine(index) {
+      if (index < 0) return;
+      const line = state.lines[index];
+      line.grabbed = true;
+      line.grabbedIndex = segmentIndexFromY(state.pointerY);
+      state.grabbedLine = index;
+    }
+
+    function releaseLines() {
+      for (const line of state.lines) {
+        for (let i = 0; i < state.segments; i++) {
+          line.restX[i] = line.x[i];
+          line.restY[i] = line.y[i];
+          line.vx[i] = 0;
+          line.vy[i] = 0;
+        }
+        line.anchorX = line.restX[segmentIndexFromY(state.pointerY)];
+        line.grabbed = false;
+        line.grabbedIndex = -1;
+        line.influence = 0;
+      }
+      for (const line of state.fineLines) {
+        for (let i = 0; i < state.segments; i++) {
+          line.restX[i] = line.x[i];
+          line.restY[i] = line.y[i];
+          line.vx[i] = 0;
+          line.vy[i] = 0;
+        }
+        line.anchorX = line.restX[segmentIndexFromY(state.pointerY)];
+        line.grabbed = false;
+        line.grabbedIndex = -1;
+        line.influence = 0;
+      }
+      state.grabbedLine = -1;
+    }
+
+    function resetScene() {
+      state.pointerDown = false;
+      state.hoveredLine = -1;
+      state.grabbedLine = -1;
+      state.lines = [];
+      state.fineLines = [];
+      rebuildLines();
+
+      if (state.cameraEnabled && state.cameraLuma && state.cameraBgLuma) {
+        state.cameraBgLuma.set(state.cameraLuma);
+        if (state.cameraMask) state.cameraMask.fill(0);
+        if (state.cameraMaskSmooth) state.cameraMaskSmooth.fill(0);
+        state.cameraBgReady = true;
+      }
+    }
+
+    function updateLine(line, hoverAmount) {
+      line.influence *= 0.9;
+      line.cameraDepth *= 0.92;
+      const hoverScale = PERF.hoverForce;
+      const cameraScale = PERF.cameraForce;
+
+      const stiffness = line.isFine ? 0.24 : 0.30;
+      const returnForceX = line.isFine ? 0.08 : 0.13;
+      const returnForceY = line.isFine ? 0.08 : 0.13;
+      const damping = line.isFine ? 0.92 : 0.90;
+
+      for (let i = 1; i < state.segments - 1; i++) {
+        if (line.grabbed && i === line.grabbedIndex) continue;
+        const neighborForceX = (line.x[i - 1] + line.x[i + 1] - 2 * line.x[i]) * stiffness;
+        const neighborForceY = (line.y[i - 1] + line.y[i + 1] - 2 * line.y[i]) * stiffness;
+        const homeForceX = (line.restX[i] - line.x[i]) * returnForceX;
+        const homeForceY = (line.restY[i] - line.y[i]) * returnForceY;
+        line.vx[i] += neighborForceX + homeForceX;
+        line.vy[i] += neighborForceY + homeForceY;
+
+        if (state.cameraEnabled) {
+          const cameraField = sampleCameraField(line.x[i], line.y[i]);
+          if (state.cameraBgReady) {
+            const silhouetteForce = cameraField.mask;
+            const fineBoost = line.isFine ? 0.55 : 0.34;
+            const bodyCenterX = state.boxX + state.cameraBodyX * state.boxWidth;
+            const bodyCenterY = state.boxY + state.cameraBodyY * state.boxHeight;
+            const dxBody = line.x[i] - bodyCenterX;
+            const dyBody = line.y[i] - bodyCenterY;
+            const bodyDistance = Math.hypot(dxBody, dyBody) || 1;
+            const bodyFalloff = Math.max(0, 1 - bodyDistance / (Math.min(state.boxWidth, state.boxHeight) * 0.42));
+            const edgeRepelX = -cameraField.mx * 20;
+            const edgeRepelY = -cameraField.my * 20;
+            const bodyRepel = silhouetteForce * (line.isFine ? 4.8 : 3.2) * (0.22 + state.cameraBodyMass * 0.2);
+            const interiorPushX = (dxBody / bodyDistance) * bodyRepel * bodyFalloff;
+            const interiorPushY = (dyBody / bodyDistance) * bodyRepel * bodyFalloff;
+            const depthPush = cameraField.depth * (line.isFine ? 4 : 2);
+            line.vx[i] += ((edgeRepelX + cameraField.gx * 2.2 + (0.5 - cameraField.luma) * 0.8) * silhouetteForce * fineBoost) * cameraScale;
+            line.vy[i] += ((edgeRepelY + cameraField.gy * 1.8) * silhouetteForce * fineBoost) * cameraScale;
+            line.vx[i] += interiorPushX * cameraScale;
+            line.vy[i] += interiorPushY * cameraScale;
+            line.vx[i] += depthPush * ((i / (state.segments - 1)) - 0.5) * cameraScale;
+            if (silhouetteForce > 0.45) {
+              line.x[i] += interiorPushX * 0.015 * cameraScale;
+              line.y[i] += interiorPushY * 0.015 * cameraScale;
+            }
+            line.cameraDepth = Math.max(line.cameraDepth, cameraField.depth * fineBoost);
+            line.influence = Math.max(line.influence, Math.min(0.14, silhouetteForce * 0.14 + cameraField.motion * 0.18 + bodyFalloff * state.cameraBodyMass * 0.03));
+          } else {
+            const fineBoost = line.isFine ? 0.4 : 0.32;
+            const motionForce = cameraField.motion * 3.2;
+            line.vx[i] += ((cameraField.gx * 1.8 + (0.5 - cameraField.luma) * 0.28) * fineBoost) * cameraScale;
+            line.vy[i] += ((cameraField.gy * 1.8 + motionForce * ((i / (state.segments - 1)) - 0.5)) * fineBoost) * cameraScale;
+            line.cameraDepth = Math.max(line.cameraDepth, cameraField.motion * 0.18);
+            line.influence = Math.max(line.influence, Math.min(0.08, cameraField.motion * 0.22));
+          }
+        }
+
+        line.vx[i] *= damping;
+        line.vy[i] *= damping;
+      }
+
+      if (!line.grabbed && hoverAmount > 0) {
+        const seg = segmentIndexFromY(state.pointerY);
+        const dx = state.pointerX - line.x[seg];
+        const dy = state.pointerY - line.y[seg];
+        const lead = line.isFine ? 0.14 : 0.34;
+        const side1 = line.isFine ? 0.09 : 0.22;
+        const side2 = line.isFine ? 0.04 : 0.10;
+        line.x[seg] += dx * lead * hoverAmount * hoverScale;
+        line.y[seg] += dy * lead * hoverAmount * hoverScale;
+        if (seg > 1) {
+          line.x[seg - 1] += dx * side1 * hoverAmount * hoverScale;
+          line.y[seg - 1] += dy * side1 * hoverAmount * hoverScale;
+        }
+        if (seg < state.segments - 2) {
+          line.x[seg + 1] += dx * side1 * hoverAmount * hoverScale;
+          line.y[seg + 1] += dy * side1 * hoverAmount * hoverScale;
+        }
+        if (seg > 2) {
+          line.x[seg - 2] += dx * side2 * hoverAmount * hoverScale;
+          line.y[seg - 2] += dy * side2 * hoverAmount * hoverScale;
+        }
+        if (seg < state.segments - 3) {
+          line.x[seg + 2] += dx * side2 * hoverAmount * hoverScale;
+          line.y[seg + 2] += dy * side2 * hoverAmount * hoverScale;
+        }
+        line.influence = Math.max(line.influence, (line.isFine ? 0.08 : 0.18) * hoverAmount * hoverScale);
+      }
+
+      if (line.grabbed) {
+        const g = line.grabbedIndex;
+        line.x[g] = state.pointerX;
+        line.y[g] = state.pointerY;
+        line.vx[g] = 0;
+        line.vy[g] = 0;
+        if (g > 1) {
+          line.x[g - 1] += (state.pointerX - line.x[g - 1]) * 0.28;
+          line.y[g - 1] += (state.pointerY - line.y[g - 1]) * 0.28;
+        }
+        if (g < state.segments - 2) {
+          line.x[g + 1] += (state.pointerX - line.x[g + 1]) * 0.28;
+          line.y[g + 1] += (state.pointerY - line.y[g + 1]) * 0.28;
+        }
+        if (g > 2) {
+          line.x[g - 2] += (state.pointerX - line.x[g - 2]) * 0.14;
+          line.y[g - 2] += (state.pointerY - line.y[g - 2]) * 0.14;
+        }
+        if (g < state.segments - 3) {
+          line.x[g + 2] += (state.pointerX - line.x[g + 2]) * 0.14;
+          line.y[g + 2] += (state.pointerY - line.y[g + 2]) * 0.14;
+        }
+      }
+
+      for (let i = 1; i < state.segments - 1; i++) {
+        if (line.grabbed && i === line.grabbedIndex) continue;
+        line.x[i] += line.vx[i];
+        line.y[i] += line.vy[i];
+      }
+
+      line.x[0] = line.restX[0];
+      line.x[state.segments - 1] = line.restX[state.segments - 1];
+      line.y[0] = line.restY[0];
+      line.y[state.segments - 1] = line.restY[state.segments - 1];
+      line.vx[0] = 0;
+      line.vx[state.segments - 1] = 0;
+      line.vy[0] = 0;
+      line.vy[state.segments - 1] = 0;
+
+      let maxStretch = 0;
+      for (let i = 0; i < state.segments; i++) {
+        const dx = line.x[i] - line.restX[i];
+        const dy = line.y[i] - line.restY[i];
+        const stretch = Math.hypot(dx, dy);
+        if (stretch > maxStretch) maxStretch = stretch;
+      }
+      line.tension = Math.max(0, Math.min(1, maxStretch / (line.isFine ? 95 : 140)));
+      const visualTension = Math.max(line.tension, line.influence);
+      if (line.isFine) {
+        line.thickness = 1;
+      } else if (state.cameraEnabled) {
+        line.thickness = 5;
+      } else {
+        line.thickness = lerp(5, 80, visualTension);
+      }
+    }
+
+    function applyCurtainEffect() {
+      if (state.grabbedLine < 0) return;
+      if (state.grabbedLine >= state.lines.length) return;
+      const curtainScale = PERF.curtainForce;
+
+      const mainLine = state.lines[state.grabbedLine];
+      const draggedOffsetX = state.pointerX - mainLine.anchorX;
+      const draggedOffsetY = state.pointerY - mainLine.restY[mainLine.grabbedIndex];
+      const edgeX = Math.min(state.pointerX - state.boxX, state.boxX + state.boxWidth - state.pointerX);
+      const edgeY = Math.min(state.pointerY - state.boxY, state.boxY + state.boxHeight - state.pointerY);
+      const edgeDistance = Math.max(0, Math.min(edgeX, edgeY));
+      const maxEdgeDistance = Math.min(state.boxWidth, state.boxHeight) * 0.5;
+      const edgePull = 1 - Math.max(0, Math.min(1, edgeDistance / maxEdgeDistance));
+      const seg = mainLine.grabbedIndex;
+      mainLine.influence = Math.max(mainLine.influence, edgePull);
+
+      for (let i = 0; i < state.lineCount; i++) {
+        if (i === state.grabbedLine) continue;
+        const line = state.lines[i];
+        const distIndex = Math.abs(i - state.grabbedLine);
+        const influence = Math.exp(-distIndex * 0.35);
+        if (influence < 0.01) continue;
+
+        const pushX = draggedOffsetX * 0.32 * influence * curtainScale;
+        const pushY = draggedOffsetY * 0.32 * influence * curtainScale;
+        line.influence = Math.max(line.influence, influence * Math.max(mainLine.tension, edgePull));
+        const s = Math.max(1, Math.min(state.segments - 2, seg));
+        line.x[s] += pushX;
+        line.y[s] += pushY;
+        line.vx[s] += pushX * 0.05;
+        line.vy[s] += pushY * 0.05;
+        if (s > 1) {
+          line.x[s - 1] += pushX * 0.82;
+          line.y[s - 1] += pushY * 0.82;
+          line.vx[s - 1] += pushX * 0.05;
+          line.vy[s - 1] += pushY * 0.05;
+        }
+        if (s < state.segments - 2) {
+          line.x[s + 1] += pushX * 0.82;
+          line.y[s + 1] += pushY * 0.82;
+          line.vx[s + 1] += pushX * 0.05;
+          line.vy[s + 1] += pushY * 0.05;
+        }
+        if (s > 2) {
+          line.x[s - 2] += pushX * 0.48;
+          line.y[s - 2] += pushY * 0.48;
+        }
+        if (s < state.segments - 3) {
+          line.x[s + 2] += pushX * 0.48;
+          line.y[s + 2] += pushY * 0.48;
+        }
+      }
+
+      for (let i = 0; i < state.fineLineCount; i++) {
+        const line = state.fineLines[i];
+        let nearest = 9999;
+        for (let j = 0; j < state.lineCount; j++) {
+          const distance = state.spacing === 0 ? 0 : Math.abs(line.anchorX - state.lines[j].anchorX) / state.spacing;
+          if (distance < nearest) nearest = distance;
+        }
+
+        const influence = Math.exp(-nearest * 0.5);
+        if (influence < 0.01) continue;
+
+        const pushX = draggedOffsetX * 0.20 * influence * curtainScale;
+        const pushY = draggedOffsetY * 0.20 * influence * curtainScale;
+        const s = Math.max(1, Math.min(state.segments - 2, seg));
+
+        line.influence = Math.max(line.influence, influence * Math.max(mainLine.tension, edgePull) * 0.7);
+        line.x[s] += pushX;
+        line.y[s] += pushY;
+        line.vx[s] += pushX * 0.04;
+        line.vy[s] += pushY * 0.04;
+
+        if (s > 1) {
+          line.x[s - 1] += pushX * 0.68;
+          line.y[s - 1] += pushY * 0.68;
+        }
+        if (s < state.segments - 2) {
+          line.x[s + 1] += pushX * 0.68;
+          line.y[s + 1] += pushY * 0.68;
+        }
+      }
+    }
+
+    function toClipX(x) {
+      return (x / state.width) * 2 - 1;
+    }
+
+    function toClipY(y) {
+      return 1 - (y / state.height) * 2;
+    }
+
+    function pushVertex(vertices, x, y, color) {
+      vertices.push(toClipX(x), toClipY(y), color[0], color[1], color[2], color[3]);
+    }
+
+    function pushQuad(vertices, x1, y1, x2, y2, halfWidth, color) {
+      const dx = x2 - x1;
+      const dy = y2 - y1;
+      const length = Math.hypot(dx, dy) || 1;
+      const nx = -dy / length;
+      const ny = dx / length;
+      const ox = nx * halfWidth;
+      const oy = ny * halfWidth;
+
+      pushVertex(vertices, x1 - ox, y1 - oy, color);
+      pushVertex(vertices, x1 + ox, y1 + oy, color);
+      pushVertex(vertices, x2 + ox, y2 + oy, color);
+
+      pushVertex(vertices, x1 - ox, y1 - oy, color);
+      pushVertex(vertices, x2 + ox, y2 + oy, color);
+      pushVertex(vertices, x2 - ox, y2 - oy, color);
+    }
+
+    function pushCircle(vertices, cx, cy, radius, color) {
+      const segments = 24;
+      for (let i = 0; i < segments; i++) {
+        const a0 = (i / segments) * Math.PI * 2;
+        const a1 = ((i + 1) / segments) * Math.PI * 2;
+        pushVertex(vertices, cx, cy, color);
+        pushVertex(vertices, cx + Math.cos(a0) * radius, cy + Math.sin(a0) * radius, color);
+        pushVertex(vertices, cx + Math.cos(a1) * radius, cy + Math.sin(a1) * radius, color);
+      }
+    }
+
+    function getCurvePoint(line, index) {
+      const i0 = Math.max(0, index - 1);
+      const i1 = index;
+      const i2 = Math.min(state.segments - 1, index + 1);
+      const i3 = Math.min(state.segments - 1, index + 2);
+      return { i0, i1, i2, i3 };
+    }
+
+    function catmullRom(a, b, c, d, t) {
+      const t2 = t * t;
+      const t3 = t2 * t;
+      return 0.5 * (
+        (2 * b) +
+        (-a + c) * t +
+        (2 * a - 5 * b + 4 * c - d) * t2 +
+        (-a + 3 * b - 3 * c + d) * t3
+      );
+    }
+
+    function pushSmoothLine(vertices, line, halfWidth, color, quality = 1) {
+      const subdivisions = Math.max(6, Math.ceil(Math.max(halfWidth * 1.8, 10) * quality));
+
+      for (let s = 0; s < state.segments - 1; s++) {
+        const p = getCurvePoint(line, s);
+        let prevX = line.x[s];
+        let prevY = line.y[s];
+
+        for (let step = 1; step <= subdivisions; step++) {
+          const t = step / subdivisions;
+          const nextX = catmullRom(
+            line.x[p.i0],
+            line.x[p.i1],
+            line.x[p.i2],
+            line.x[p.i3],
+            t
+          );
+          const nextY = catmullRom(
+            line.y[p.i0],
+            line.y[p.i1],
+            line.y[p.i2],
+            line.y[p.i3],
+            t
+          );
+          pushQuad(vertices, prevX, prevY, nextX, nextY, halfWidth, color);
+          prevX = nextX;
+          prevY = nextY;
+        }
+      }
+    }
+
+    function strokeSmoothLine2D(ctx, line, thickness, color, targetWidth, targetHeight) {
+      const view = getRenderView(targetWidth, targetHeight);
+      const subdivisions = Math.max(8, Math.ceil(Math.max(thickness * view.scale * 1.6, 16)));
+
+      ctx.save();
+      ctx.strokeStyle = colorToCss(color);
+      ctx.lineWidth = Math.max(1, thickness * view.scale);
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      ctx.beginPath();
+
+      const startX = view.offsetX + line.x[0] * view.scale;
+      const startY = view.offsetY + line.y[0] * view.scale;
+      ctx.moveTo(startX, startY);
+
+      for (let s = 0; s < state.segments - 1; s++) {
+        const p = getCurvePoint(line, s);
+        for (let step = 1; step <= subdivisions; step++) {
+          const t = step / subdivisions;
+          const nextX = catmullRom(line.x[p.i0], line.x[p.i1], line.x[p.i2], line.x[p.i3], t);
+          const nextY = catmullRom(line.y[p.i0], line.y[p.i1], line.y[p.i2], line.y[p.i3], t);
+          ctx.lineTo(
+            view.offsetX + nextX * view.scale,
+            view.offsetY + nextY * view.scale
+          );
+        }
+      }
+
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    function fillCircle2D(ctx, x, y, radius, color, targetWidth, targetHeight) {
+      const view = getRenderView(targetWidth, targetHeight);
+      ctx.save();
+      ctx.fillStyle = colorToCss(color);
+      ctx.beginPath();
+      ctx.arc(
+        view.offsetX + x * view.scale,
+        view.offsetY + y * view.scale,
+        radius * view.scale,
+        0,
+        Math.PI * 2
+      );
+      ctx.fill();
+      ctx.restore();
+    }
+
+    function renderLinesToCanvas2D(ctx, targetWidth, targetHeight) {
+      for (let i = 0; i < state.fineLineCount; i++) {
+        const line = state.fineLines[i];
+        const visual = Math.max(line.influence, line.cameraDepth * 0.8);
+        const color = state.cameraEnabled ? tensionColor(DARK_FINE, visual) : tensionColor(WHITE_SOFT, visual);
+        const thickness = 1.0 + line.cameraDepth * 0.9;
+        strokeSmoothLine2D(ctx, line, thickness * 0.7, color, targetWidth, targetHeight);
+      }
+
+      for (let i = 0; i < state.lineCount; i++) {
+        const line = state.lines[i];
+        const color = state.cameraEnabled
+          ? BLUE
+          : tensionColor(BLACK, Math.max(line.tension, line.influence, line.cameraDepth * 0.85));
+        strokeSmoothLine2D(ctx, line, line.thickness, color, targetWidth, targetHeight);
+
+        if (i === state.hoveredLine && state.grabbedLine === -1) {
+          fillCircle2D(ctx, line.anchorX, state.pointerY, 8, BLUE, targetWidth, targetHeight);
+          fillCircle2D(ctx, line.anchorX, state.pointerY, 3, [1, 1, 1, 1], targetWidth, targetHeight);
+        }
+
+        if (line.grabbed && line.grabbedIndex >= 0) {
+          const gx = line.x[line.grabbedIndex];
+          const gy = line.y[line.grabbedIndex];
+          fillCircle2D(ctx, gx, gy, 8, BLUE, targetWidth, targetHeight);
+          fillCircle2D(ctx, gx, gy, 3, [1, 1, 1, 1], targetWidth, targetHeight);
+        }
+      }
+    }
+
+    function buildGeometry() {
+      const pointVertices = [];
+      const lineFillVertices = [];
+      const fineLineFillVertices = [];
+
+      for (let i = 0; i < state.fineLineCount; i++) {
+        const line = state.fineLines[i];
+        const visual = Math.max(line.influence, line.cameraDepth * 0.8);
+        const color = state.cameraEnabled ? tensionColor(DARK_FINE, visual) : tensionColor(WHITE_SOFT, visual);
+        const thickness = 1.0 + line.cameraDepth * 0.9;
+        pushSmoothLine(fineLineFillVertices, line, thickness * 0.35, color, 0.35);
+      }
+
+      for (let i = 0; i < state.lineCount; i++) {
+        const line = state.lines[i];
+        const color = state.cameraEnabled
+          ? BLUE
+          : tensionColor(BLACK, Math.max(line.tension, line.influence, line.cameraDepth * 0.85));
+        pushSmoothLine(lineFillVertices, line, line.thickness * 0.5, color);
+
+        if (i === state.hoveredLine && state.grabbedLine === -1) {
+          pushCircle(pointVertices, line.anchorX, state.pointerY, 8, BLUE);
+          pushCircle(pointVertices, line.anchorX, state.pointerY, 3, [1, 1, 1, 1]);
+        }
+
+        if (line.grabbed && line.grabbedIndex >= 0) {
+          const gx = line.x[line.grabbedIndex];
+          const gy = line.y[line.grabbedIndex];
+          pushCircle(pointVertices, gx, gy, 8, BLUE);
+          pushCircle(pointVertices, gx, gy, 3, [1, 1, 1, 1]);
+        }
+      }
+
+      return {
+        fineLineFillData: new Float32Array(fineLineFillVertices),
+        lineFillData: new Float32Array(lineFillVertices),
+        pointData: new Float32Array(pointVertices)
+      };
+    }
+
+    function render() {
+      gl.clearColor(1, 1, 1, state.cameraEnabled ? 0 : 1);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      const geometry = buildGeometry();
+      gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
+
+      if (geometry.fineLineFillData.length > 0) {
+        gl.bufferData(gl.ARRAY_BUFFER, geometry.fineLineFillData, gl.DYNAMIC_DRAW);
+        gl.vertexAttribPointer(aPosition, 2, gl.FLOAT, false, 24, 0);
+        gl.vertexAttribPointer(aColor, 4, gl.FLOAT, false, 24, 8);
+        gl.drawArrays(gl.TRIANGLES, 0, geometry.fineLineFillData.length / 6);
+      }
+
+      if (geometry.lineFillData.length > 0) {
+        gl.bufferData(gl.ARRAY_BUFFER, geometry.lineFillData, gl.DYNAMIC_DRAW);
+        gl.vertexAttribPointer(aPosition, 2, gl.FLOAT, false, 24, 0);
+        gl.vertexAttribPointer(aColor, 4, gl.FLOAT, false, 24, 8);
+        gl.drawArrays(gl.TRIANGLES, 0, geometry.lineFillData.length / 6);
+      }
+
+      if (geometry.pointData.length > 0) {
+        gl.bufferData(gl.ARRAY_BUFFER, geometry.pointData, gl.DYNAMIC_DRAW);
+        gl.vertexAttribPointer(aPosition, 2, gl.FLOAT, false, 24, 0);
+        gl.vertexAttribPointer(aColor, 4, gl.FLOAT, false, 24, 8);
+        gl.drawArrays(gl.TRIANGLES, 0, geometry.pointData.length / 6);
+      }
+
+    }
+
+    function frame() {
+      state.time += 1;
+      updateCameraFrame();
+      findHoveredLine();
+      for (let i = 0; i < state.fineLineCount; i++) {
+        updateLine(state.fineLines[i], hoverAmountForLine(state.fineLines[i]));
+      }
+      for (let i = 0; i < state.lineCount; i++) {
+        updateLine(state.lines[i], i === state.hoveredLine ? 1 : hoverAmountForLine(state.lines[i]));
+      }
+      applyCurtainEffect();
+      render();
+      if (state.recordingHighQuality) {
+        renderExportFrame();
+      }
+      updateRecordingHud();
+      state.rafId = requestAnimationFrame(frame);
+    }
+
+    function updatePointer(event) {
+      const rect = canvas.getBoundingClientRect();
+      state.pointerX = event.clientX - rect.left;
+      state.pointerY = event.clientY - rect.top;
+    }
+
+    function onPointerMove(event) {
+      if (event.cancelable && event.pointerType === "touch") {
+        event.preventDefault();
+      }
+      updatePointer(event);
+    }
+
+    function onPointerDown(event) {
+      if (event.cancelable) {
+        event.preventDefault();
+      }
+      updatePointer(event);
+      state.pointerDown = true;
+      findHoveredLine();
+      if (state.hoveredLine >= 0) grabLine(state.hoveredLine);
+      if (canvas.setPointerCapture && event.pointerId !== undefined) {
+        canvas.setPointerCapture(event.pointerId);
+      }
+    }
+
+    function onPointerUp(event) {
+      if (event && event.cancelable && event.pointerType === "touch") {
+        event.preventDefault();
+      }
+      state.pointerDown = false;
+      releaseLines();
+    }
+
+    function onPointerLeave() {
+      state.hoveredLine = -1;
+      if (!state.pointerDown) return;
+      state.pointerDown = false;
+      releaseLines();
+    }
+
+    canvas.addEventListener("pointermove", onPointerMove, { passive: false });
+    canvas.addEventListener("pointerdown", onPointerDown, { passive: false });
+    window.addEventListener("pointerup", onPointerUp, { passive: false });
+    canvas.addEventListener("pointerleave", onPointerLeave);
+    canvas.addEventListener("pointercancel", onPointerUp, { passive: false });
+
+    window.addEventListener("resize", resize);
+
+    window.addEventListener("keydown", (event) => {
+      if (event.code === "Space") {
+        event.preventDefault();
+        if (state.recordHotkeyDown) return;
+        state.recordHotkeyDown = true;
+        toggleRecordingHighQuality();
+        return;
+      }
+
+      if ((event.key === "s" || event.key === "S") && !event.repeat) {
+        event.preventDefault();
+        saveJpgFrame();
+      }
+    });
+
+    window.addEventListener("keyup", (event) => {
+      if (event.code === "Space") {
+        state.recordHotkeyDown = false;
+      }
+    });
+
+    cameraBtn.addEventListener("click", () => {
+      toggleCamera();
+    });
+
+    resetBtn.addEventListener("click", () => {
+      resetScene();
+    });
+
+    saveBtn.addEventListener("click", () => {
+      saveJpgFrame();
+    });
+
+    recordBtn.addEventListener("click", () => {
+      toggleRecordingHighQuality();
+    });
+
+    cameraSelect.addEventListener("change", async () => {
+      state.selectedVideoDeviceId = cameraSelect.value;
+
+      if (!state.cameraEnabled) return;
+
+      stopCameraStream();
+      clearCameraState();
+
+      try {
+        await startCameraStream();
+      } catch (error) {
+        clearCameraState();
+      }
+    });
+
+    densitySlider.addEventListener("input", () => {
+      state.symbolDensity = Number(densitySlider.value);
+    });
+
+    symbolSizeSlider.addEventListener("input", () => {
+      state.symbolSize = Number(symbolSizeSlider.value);
+    });
+
+    symbolMixSlider.addEventListener("input", () => {
+      state.symbolMix = Number(symbolMixSlider.value) / 100;
+    });
+
+    speedSlider.addEventListener("input", () => {
+      state.symbolSpeed = Number(speedSlider.value) / 100;
+    });
+
+    contrastSlider.addEventListener("input", () => {
+      state.symbolContrast = Number(contrastSlider.value) / 100;
+    });
+
+    updateRecordingHud();
+    refreshVideoInputs();
+    resize();
+    frame();
+  </script>
+</body>
+</html>
