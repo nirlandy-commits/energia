@@ -160,6 +160,47 @@
       min-width: 150px;
     }
 
+    @media (max-width: 900px) and (pointer: coarse) {
+      .controls {
+        top: 12px;
+        left: 12px;
+        gap: 6px;
+      }
+
+      .controls button,
+      .controls input,
+      .controls select {
+        padding: 7px 9px;
+        font-size: 12px;
+      }
+
+      .controls input {
+        width: 92px;
+      }
+
+      .param-panel {
+        top: 54px;
+        left: 12px;
+        gap: 5px;
+        padding: 9px 10px;
+        min-width: 170px;
+      }
+
+      .param-panel label,
+      .hud {
+        font-size: 10px;
+      }
+
+      .hud-left {
+        left: 12px;
+      }
+
+      .hud-right {
+        right: 12px;
+        min-width: 120px;
+      }
+    }
+
   </style>
 </head>
 <body>
@@ -271,11 +312,50 @@
     const DARK_FINE = [0.16, 0.16, 0.16, 0.82];
     const BLUE = [40 / 255, 120 / 255, 1, 1];
     const GREEN = [0 / 255, 242 / 255, 103 / 255, 1];
+    const MOBILE_MODE = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)
+      || (window.matchMedia("(max-width: 900px)").matches && window.matchMedia("(pointer: coarse)").matches);
+    const PERF = MOBILE_MODE
+      ? {
+          dprCap: 1,
+          lineCount: 4,
+          fineLineCount: 72,
+          segments: 28,
+          cameraWidth: 56,
+          cameraHeight: 96,
+          symbolDensity: 5,
+          symbolSize: 8,
+          symbolMix: 0,
+          symbolSpeed: 0,
+          symbolContrast: 1.2,
+          mainHoverRadius: 24,
+          fineHoverRadius: 40,
+          hoverForce: 0.42,
+          cameraForce: 0.22,
+          curtainForce: 0.38
+        }
+      : {
+          dprCap: 2,
+          lineCount: 10,
+          fineLineCount: 240,
+          segments: 72,
+          cameraWidth: 120,
+          cameraHeight: 200,
+          symbolDensity: 12,
+          symbolSize: 14,
+          symbolMix: 0,
+          symbolSpeed: 0,
+          symbolContrast: 1.7,
+          mainHoverRadius: 42,
+          fineHoverRadius: 85,
+          hoverForce: 1,
+          cameraForce: 1,
+          curtainForce: 1
+        };
 
     const state = {
-      lineCount: 10,
-      fineLineCount: 240,
-      segments: 72,
+      lineCount: PERF.lineCount,
+      fineLineCount: PERF.fineLineCount,
+      segments: PERF.segments,
       grabRadius: 30,
       hoverRadius: 40,
       leftMargin: 0,
@@ -299,8 +379,8 @@
       cameraStream: null,
       cameraCanvas: null,
       cameraCtx: null,
-      cameraWidth: 120,
-      cameraHeight: 200,
+      cameraWidth: PERF.cameraWidth,
+      cameraHeight: PERF.cameraHeight,
       cameraLuma: null,
       cameraBgLuma: null,
       cameraPrevLuma: null,
@@ -321,11 +401,11 @@
       recordHotkeyDown: false,
       rafId: 0,
       time: 0,
-      symbolDensity: 12,
-      symbolSize: 14,
-      symbolMix: 0,
-      symbolSpeed: 0,
-      symbolContrast: 1.7,
+      symbolDensity: PERF.symbolDensity,
+      symbolSize: PERF.symbolSize,
+      symbolMix: PERF.symbolMix,
+      symbolSpeed: PERF.symbolSpeed,
+      symbolContrast: PERF.symbolContrast,
       dpr: 1,
       width: 1,
       height: 1
@@ -711,7 +791,7 @@
       ctx.lineJoin = "round";
 
       const time = state.time * (0.002 + state.symbolSpeed * 0.04);
-      const cols = Math.max(6, Math.round(state.symbolDensity * 7));
+      const cols = Math.max(MOBILE_MODE ? 3 : 6, Math.round(state.symbolDensity * (MOBILE_MODE ? 2.8 : 7)));
       const cell = view.renderWidth / cols;
       const rows = Math.ceil(view.renderHeight / cell);
       const baseSize = cell * (0.24 + state.symbolSize / 10);
@@ -732,7 +812,7 @@
           const gradMag = Math.hypot(grad.gx, grad.gy);
           const contrastLuma = clamp((luma - 0.5) * state.symbolContrast + 0.5, 0, 1);
           const density = 0.12 + (1 - contrastLuma) * 0.88;
-          const keep = hashNoise(col * 3.21, row * 4.37, 1.0) < density * 0.86;
+          const keep = hashNoise(col * 3.21, row * 4.37, 1.0) < density * (MOBILE_MODE ? 0.54 : 0.86);
 
           if (!keep) continue;
 
@@ -803,11 +883,40 @@
     }
 
     function saveJpgFrame() {
-      ensureExportCanvas(3840, 2160);
+      const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+      const exportWidth = MOBILE_MODE ? 1080 : 3840;
+      const exportHeight = MOBILE_MODE ? 1920 : 2160;
+      ensureExportCanvas(exportWidth, exportHeight);
       drawCompositeFrame(state.exportCtx, state.exportCanvas.width, state.exportCanvas.height);
 
+      if (MOBILE_MODE && state.exportCanvas.toBlob) {
+        state.exportCanvas.toBlob(async (blob) => {
+          if (!blob) return;
+
+          const file = new File([blob], `energia-${stamp}.jpg`, { type: "image/jpeg" });
+          if (navigator.canShare && navigator.canShare({ files: [file] })) {
+            try {
+              await navigator.share({
+                files: [file],
+                title: "Energia, por Nirlandy Pinheiro"
+              });
+              return;
+            } catch (error) {
+              if (error && error.name === "AbortError") return;
+            }
+          }
+
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement("a");
+          link.href = url;
+          link.download = file.name;
+          link.click();
+          setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }, "image/jpeg", 0.94);
+        return;
+      }
+
       const link = document.createElement("a");
-      const stamp = new Date().toISOString().replace(/[:.]/g, "-");
       link.href = state.exportCanvas.toDataURL("image/jpeg", 0.96);
       link.download = `energia-4k-${stamp}.jpg`;
       link.click();
@@ -1066,7 +1175,7 @@
     }
 
     function resize() {
-      state.dpr = Math.min(window.devicePixelRatio || 1, 2);
+      state.dpr = Math.min(window.devicePixelRatio || 1, PERF.dprCap);
       const cssWidth = Math.max(1, Math.round(stage.clientWidth || 720));
       const cssHeight = Math.max(1, Math.round(stage.clientHeight || 1280));
       cameraFx.width = Math.floor(cssWidth * state.dpr);
@@ -1114,7 +1223,7 @@
       const dx = state.pointerX - line.x[seg];
       const dy = state.pointerY - line.y[seg];
       const distance = Math.hypot(dx, dy);
-      const radius = line.isFine ? 85 : 42;
+      const radius = line.isFine ? PERF.fineHoverRadius : PERF.mainHoverRadius;
       return Math.max(0, 1 - distance / radius);
     }
 
@@ -1173,6 +1282,8 @@
     function updateLine(line, hoverAmount) {
       line.influence *= 0.9;
       line.cameraDepth *= 0.92;
+      const hoverScale = PERF.hoverForce;
+      const cameraScale = PERF.cameraForce;
 
       const stiffness = line.isFine ? 0.24 : 0.30;
       const returnForceX = line.isFine ? 0.08 : 0.13;
@@ -1205,22 +1316,22 @@
             const interiorPushX = (dxBody / bodyDistance) * bodyRepel * bodyFalloff;
             const interiorPushY = (dyBody / bodyDistance) * bodyRepel * bodyFalloff;
             const depthPush = cameraField.depth * (line.isFine ? 4 : 2);
-            line.vx[i] += (edgeRepelX + cameraField.gx * 2.2 + (0.5 - cameraField.luma) * 0.8) * silhouetteForce * fineBoost;
-            line.vy[i] += (edgeRepelY + cameraField.gy * 1.8) * silhouetteForce * fineBoost;
-            line.vx[i] += interiorPushX;
-            line.vy[i] += interiorPushY;
-            line.vx[i] += depthPush * ((i / (state.segments - 1)) - 0.5);
+            line.vx[i] += ((edgeRepelX + cameraField.gx * 2.2 + (0.5 - cameraField.luma) * 0.8) * silhouetteForce * fineBoost) * cameraScale;
+            line.vy[i] += ((edgeRepelY + cameraField.gy * 1.8) * silhouetteForce * fineBoost) * cameraScale;
+            line.vx[i] += interiorPushX * cameraScale;
+            line.vy[i] += interiorPushY * cameraScale;
+            line.vx[i] += depthPush * ((i / (state.segments - 1)) - 0.5) * cameraScale;
             if (silhouetteForce > 0.45) {
-              line.x[i] += interiorPushX * 0.015;
-              line.y[i] += interiorPushY * 0.015;
+              line.x[i] += interiorPushX * 0.015 * cameraScale;
+              line.y[i] += interiorPushY * 0.015 * cameraScale;
             }
             line.cameraDepth = Math.max(line.cameraDepth, cameraField.depth * fineBoost);
             line.influence = Math.max(line.influence, Math.min(0.14, silhouetteForce * 0.14 + cameraField.motion * 0.18 + bodyFalloff * state.cameraBodyMass * 0.03));
           } else {
             const fineBoost = line.isFine ? 0.4 : 0.32;
             const motionForce = cameraField.motion * 3.2;
-            line.vx[i] += (cameraField.gx * 1.8 + (0.5 - cameraField.luma) * 0.28) * fineBoost;
-            line.vy[i] += (cameraField.gy * 1.8 + motionForce * ((i / (state.segments - 1)) - 0.5)) * fineBoost;
+            line.vx[i] += ((cameraField.gx * 1.8 + (0.5 - cameraField.luma) * 0.28) * fineBoost) * cameraScale;
+            line.vy[i] += ((cameraField.gy * 1.8 + motionForce * ((i / (state.segments - 1)) - 0.5)) * fineBoost) * cameraScale;
             line.cameraDepth = Math.max(line.cameraDepth, cameraField.motion * 0.18);
             line.influence = Math.max(line.influence, Math.min(0.08, cameraField.motion * 0.22));
           }
@@ -1237,25 +1348,25 @@
         const lead = line.isFine ? 0.14 : 0.34;
         const side1 = line.isFine ? 0.09 : 0.22;
         const side2 = line.isFine ? 0.04 : 0.10;
-        line.x[seg] += dx * lead * hoverAmount;
-        line.y[seg] += dy * lead * hoverAmount;
+        line.x[seg] += dx * lead * hoverAmount * hoverScale;
+        line.y[seg] += dy * lead * hoverAmount * hoverScale;
         if (seg > 1) {
-          line.x[seg - 1] += dx * side1 * hoverAmount;
-          line.y[seg - 1] += dy * side1 * hoverAmount;
+          line.x[seg - 1] += dx * side1 * hoverAmount * hoverScale;
+          line.y[seg - 1] += dy * side1 * hoverAmount * hoverScale;
         }
         if (seg < state.segments - 2) {
-          line.x[seg + 1] += dx * side1 * hoverAmount;
-          line.y[seg + 1] += dy * side1 * hoverAmount;
+          line.x[seg + 1] += dx * side1 * hoverAmount * hoverScale;
+          line.y[seg + 1] += dy * side1 * hoverAmount * hoverScale;
         }
         if (seg > 2) {
-          line.x[seg - 2] += dx * side2 * hoverAmount;
-          line.y[seg - 2] += dy * side2 * hoverAmount;
+          line.x[seg - 2] += dx * side2 * hoverAmount * hoverScale;
+          line.y[seg - 2] += dy * side2 * hoverAmount * hoverScale;
         }
         if (seg < state.segments - 3) {
-          line.x[seg + 2] += dx * side2 * hoverAmount;
-          line.y[seg + 2] += dy * side2 * hoverAmount;
+          line.x[seg + 2] += dx * side2 * hoverAmount * hoverScale;
+          line.y[seg + 2] += dy * side2 * hoverAmount * hoverScale;
         }
-        line.influence = Math.max(line.influence, line.isFine ? 0.08 * hoverAmount : 0.18);
+        line.influence = Math.max(line.influence, (line.isFine ? 0.08 : 0.18) * hoverAmount * hoverScale);
       }
 
       if (line.grabbed) {
@@ -1318,6 +1429,7 @@
     function applyCurtainEffect() {
       if (state.grabbedLine < 0) return;
       if (state.grabbedLine >= state.lines.length) return;
+      const curtainScale = PERF.curtainForce;
 
       const mainLine = state.lines[state.grabbedLine];
       const draggedOffsetX = state.pointerX - mainLine.anchorX;
@@ -1337,8 +1449,8 @@
         const influence = Math.exp(-distIndex * 0.35);
         if (influence < 0.01) continue;
 
-        const pushX = draggedOffsetX * 0.32 * influence;
-        const pushY = draggedOffsetY * 0.32 * influence;
+        const pushX = draggedOffsetX * 0.32 * influence * curtainScale;
+        const pushY = draggedOffsetY * 0.32 * influence * curtainScale;
         line.influence = Math.max(line.influence, influence * Math.max(mainLine.tension, edgePull));
         const s = Math.max(1, Math.min(state.segments - 2, seg));
         line.x[s] += pushX;
@@ -1378,8 +1490,8 @@
         const influence = Math.exp(-nearest * 0.5);
         if (influence < 0.01) continue;
 
-        const pushX = draggedOffsetX * 0.20 * influence;
-        const pushY = draggedOffsetY * 0.20 * influence;
+        const pushX = draggedOffsetX * 0.20 * influence * curtainScale;
+        const pushY = draggedOffsetY * 0.20 * influence * curtainScale;
         const s = Math.max(1, Math.min(state.segments - 2, seg));
 
         line.influence = Math.max(line.influence, influence * Math.max(mainLine.tension, edgePull) * 0.7);
