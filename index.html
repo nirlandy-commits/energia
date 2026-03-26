@@ -23,8 +23,11 @@
 
     .stage {
       position: relative;
-      width: 720px;
-      height: 1280px;
+      width: min(720px, 100vw);
+      aspect-ratio: 9 / 16;
+      height: auto;
+      max-height: 100dvh;
+      max-width: calc(100dvh * 9 / 16);
       background: #fff;
       overflow: hidden;
     }
@@ -36,6 +39,7 @@
       width: 100%;
       height: 100%;
       display: block;
+      touch-action: none;
     }
 
     #cameraFx {
@@ -182,6 +186,7 @@
   <div class="hud hud-left" id="legendHud">S salvar<br />SPACE gravar</div>
   <div class="hud hud-right" id="recordHud">status: pronto<br />00:00</div>
   <script>
+    const stage = document.querySelector(".stage");
     const canvas = document.getElementById("gl");
     const cameraFx = document.getElementById("cameraFx");
     const cameraFxCtx = cameraFx.getContext("2d");
@@ -1062,8 +1067,8 @@
 
     function resize() {
       state.dpr = Math.min(window.devicePixelRatio || 1, 2);
-      const cssWidth = 720;
-      const cssHeight = 1280;
+      const cssWidth = Math.max(1, Math.round(stage.clientWidth || 720));
+      const cssHeight = Math.max(1, Math.round(stage.clientHeight || 1280));
       cameraFx.width = Math.floor(cssWidth * state.dpr);
       cameraFx.height = Math.floor(cssHeight * state.dpr);
       cameraFx.style.width = cssWidth + "px";
@@ -1657,28 +1662,46 @@
       state.pointerY = event.clientY - rect.top;
     }
 
-    canvas.addEventListener("mousemove", (event) => {
+    function onPointerMove(event) {
+      if (event.cancelable && event.pointerType === "touch") {
+        event.preventDefault();
+      }
       updatePointer(event);
-    });
+    }
 
-    canvas.addEventListener("mousedown", (event) => {
+    function onPointerDown(event) {
+      if (event.cancelable) {
+        event.preventDefault();
+      }
       updatePointer(event);
       state.pointerDown = true;
       findHoveredLine();
       if (state.hoveredLine >= 0) grabLine(state.hoveredLine);
-    });
+      if (canvas.setPointerCapture && event.pointerId !== undefined) {
+        canvas.setPointerCapture(event.pointerId);
+      }
+    }
 
-    window.addEventListener("mouseup", () => {
+    function onPointerUp(event) {
+      if (event && event.cancelable && event.pointerType === "touch") {
+        event.preventDefault();
+      }
       state.pointerDown = false;
       releaseLines();
-    });
+    }
 
-    canvas.addEventListener("mouseleave", () => {
+    function onPointerLeave() {
       state.hoveredLine = -1;
       if (!state.pointerDown) return;
       state.pointerDown = false;
       releaseLines();
-    });
+    }
+
+    canvas.addEventListener("pointermove", onPointerMove, { passive: false });
+    canvas.addEventListener("pointerdown", onPointerDown, { passive: false });
+    window.addEventListener("pointerup", onPointerUp, { passive: false });
+    canvas.addEventListener("pointerleave", onPointerLeave);
+    canvas.addEventListener("pointercancel", onPointerUp, { passive: false });
 
     window.addEventListener("resize", resize);
 
