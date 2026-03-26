@@ -224,7 +224,7 @@
     <canvas id="cameraFx"></canvas>
     <canvas id="gl"></canvas>
   </div>
-  <div class="hud hud-left" id="legendHud">S salvar<br />SPACE gravar</div>
+  <div class="hud hud-left" id="legendHud"></div>
   <div class="hud hud-right" id="recordHud">status: pronto<br />00:00</div>
   <script>
     const stage = document.querySelector(".stage");
@@ -236,6 +236,7 @@
     const resetBtn = document.getElementById("resetBtn");
     const saveBtn = document.getElementById("saveBtn");
     const recordBtn = document.getElementById("recordBtn");
+    const legendHud = document.getElementById("legendHud");
     const recordHud = document.getElementById("recordHud");
     const densitySlider = document.getElementById("densitySlider");
     const symbolSizeSlider = document.getElementById("symbolSizeSlider");
@@ -351,6 +352,10 @@
           cameraForce: 1,
           curtainForce: 1
         };
+
+    legendHud.innerHTML = MOBILE_MODE
+      ? "toque e arraste<br />as linhas"
+      : "passe o mouse,<br />clique e arraste as linhas";
 
     const state = {
       lineCount: PERF.lineCount,
